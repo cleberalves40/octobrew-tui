@@ -1402,6 +1402,13 @@ TEST_CASE("brew doctor: pronto, ou os avisos com os detalhes na Saída", "[app][
         detail = detail || has(l, "You should find replacements for the following casks:");
     CHECK(detail);
     CHECK(f.brew.operations().empty());   // o doctor só lê
+    f.app->handleEvent(Event::Return);
+
+    // Sai com 1 sem um "Warning:" reconhecível: o diálogo manda para a Saída.
+    writeFile(f.brew.dir.file("doctor.txt"), "Algo que o brew passou a imprimir.\n");
+    brewMenu(f, 8);
+    REQUIRE(f.dialog().kind == tui::Dialog::Message);
+    CHECK(f.dialog().message == "brew doctor reported problems.\nDetails in the Output tab.");
 }
 
 TEST_CASE("exportar e instalar de um Brewfile", "[app][bundle]")

@@ -923,11 +923,16 @@ TEST_CASE("visão Repositório com os pacotes dos taps de terceiros", "[brew][ta
 
 TEST_CASE("lê o brew doctor e o brew bundle check", "[parse][doctor][bundle]")
 {
-    const auto d = octo::parseDoctor(kDoctorOutput);
+    const auto d = octo::parseDoctor(kDoctorOutput, 1);
     CHECK_FALSE(d.ready);
     CHECK(d.warnings == std::vector<std::string>{"Some installed casks are deprecated or disabled.",
                                                  "Some installed kegs have no formulae!"});
-    CHECK(octo::parseDoctor("Your system is ready to brew.\n").ready);
+    CHECK(octo::parseDoctor("Your system is ready to brew.\n", 0).ready);
+    // Sai com 1 sem nenhum "Warning:" reconhecível (o runner do CI): não está pronto.
+    const auto other = octo::parseDoctor("Error: Your Command Line Tools are too outdated.\nUpdate them.\n", 1);
+    CHECK_FALSE(other.ready);
+    CHECK(other.warnings == std::vector<std::string>{"Your Command Line Tools are too outdated."});
+    CHECK(octo::parseDoctor("algo inesperado\n", 1).warnings.empty());
     CHECK(octo::parseBundleCheck(kBundleCheckOutput) == std::vector<std::string>{"Cask iterm2", "Formula figlet"});
     CHECK(octo::parseBundleCheck("The Brewfile's dependencies are satisfied.\n").empty());
 }

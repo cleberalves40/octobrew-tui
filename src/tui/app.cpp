@@ -1146,9 +1146,13 @@ void App::actDoctor()
         return [this, r] {
             log("brew doctor");
             appendOutput(r.output + "\n");
+            if (r.ready) {
+                showMessage(i18n::tr("Check the system"), i18n::tr("Your system is ready to brew."));
+                return;
+            }
             if (r.warnings.empty()) {
-                showMessage(i18n::tr("Check the system"), r.ready ? i18n::tr("Your system is ready to brew.")
-                                                                  : i18n::tr("brew doctor found no warnings."));
+                showMessage(i18n::tr("Check the system"),
+                            i18n::tr("brew doctor reported problems.") + "\n" + i18n::tr("Details in the Output tab."));
                 return;
             }
             showMessage(i18n::tr("Check the system"),

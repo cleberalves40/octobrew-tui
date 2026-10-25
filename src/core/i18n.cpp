@@ -301,7 +301,7 @@ const Entry kEntries[] = {
     {"Checking the system (brew doctor)…", "Verificando o sistema (brew doctor)…", "Verificando el sistema (brew doctor)…"},
     {"Check the system", "Verificar o sistema", "Verificar el sistema"},
     {"Your system is ready to brew.", "O sistema está pronto para o brew.", "El sistema está listo para brew."},
-    {"brew doctor found no warnings.", "O brew doctor não encontrou avisos.", "brew doctor no encontró avisos."},
+    {"brew doctor reported problems.", "O brew doctor apontou problemas.", "brew doctor señaló problemas."},
     {"brew doctor found %1 warning(s):", "O brew doctor encontrou %1 aviso(s):", "brew doctor encontró %1 aviso(s):"},
     {"File:", "Arquivo:", "Archivo:"},
     {"Taps, formulae and casks installed now (brew bundle dump).", "Os taps, fórmulas e casks instalados agora (brew bundle dump).", "Los taps, fórmulas y casks instalados ahora (brew bundle dump)."},

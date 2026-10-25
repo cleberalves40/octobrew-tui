@@ -1242,14 +1242,18 @@ std::vector<Package> tapPackages(const std::vector<Tap> &taps)
     return out;
 }
 
-DoctorReport parseDoctor(const std::string &output)
+DoctorReport parseDoctor(const std::string &output, int exitStatus)
 {
+    // O código de saída decide: o texto dos avisos muda de uma versão para outra.
     DoctorReport r;
     r.output = output;
-    r.ready = output.find("Your system is ready to brew.") != std::string::npos;
-    for (const auto &l : lines(output))
+    r.ready = exitStatus == 0;
+    for (const auto &l : lines(output)) {
         if (l.rfind("Warning: ", 0) == 0)
             r.warnings.push_back(trim(l.substr(9)));
+        else if (l.rfind("Error: ", 0) == 0)
+            r.warnings.push_back(trim(l.substr(7)));
+    }
     return r;
 }
 
@@ -1328,7 +1332,7 @@ DoctorReport Manager::doctor() const
     // 1: há avisos; mais que isso, falhou.
     if (r.crashed || (r.status != 0 && r.status != 1))
         fail(trim(r.err).empty() ? i18n::trf("Command failed with exit code %1", {std::to_string(r.status)}) : trim(r.err));
-    return parseDoctor(r.out + (r.out.empty() || r.err.empty() ? "" : "\n") + r.err);
+    return parseDoctor(r.out + (r.out.empty() || r.err.empty() ? "" : "\n") + r.err, r.status);
 }
 
 std::vector<std::string> Manager::bundleCheck(const std::string &file) const

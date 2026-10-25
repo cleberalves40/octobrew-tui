@@ -122,8 +122,8 @@ struct Tap {
 
 /** O "brew doctor": sai com 1 quando há avisos, o que não é uma falha. */
 struct DoctorReport {
-    bool ready = false;                  // "Your system is ready to brew."
-    std::vector<std::string> warnings;   // os títulos ("Some installed casks are deprecated or disabled.")
+    bool ready = false;                  // saiu com 0 ("Your system is ready to brew.")
+    std::vector<std::string> warnings;   // os títulos dos "Warning:" e "Error:"; pode ficar vazio sem ready
     std::string output;                  // tudo, para a aba Saída
 };
 
@@ -206,7 +206,8 @@ std::vector<Tap> parseTaps(const std::string &json);
  * tap (a versão e a descrição vêm do brew info, nos detalhes).
  */
 std::vector<Package> tapPackages(const std::vector<Tap> &taps);
-DoctorReport parseDoctor(const std::string &output);
+/** exitStatus: o código do brew doctor; 0 é "pronto". */
+DoctorReport parseDoctor(const std::string &output, int exitStatus);
 /** O que falta de um Brewfile, no "brew bundle check --verbose": "Formula figlet", "Cask iterm2". */
 std::vector<std::string> parseBundleCheck(const std::string &output);
 /** "user/repo", como o brew tap aceita (sem URL). */
