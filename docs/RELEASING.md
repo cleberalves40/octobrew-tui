@@ -86,10 +86,10 @@ dependências de compilação (cerca de um minuto).
 O homebrew-core aceita fórmulas de projetos com uso comprovado. Pelas
 [regras de aceitação](https://docs.brew.sh/Acceptable-Formulae), o repositório precisa
 ser notável (estrelas, forks, observadores) e estável, com versões publicadas. O
-`brew audit --new` do job da fórmula mostra, a cada PR, o que o homebrew-core ainda
-recusaria.
+`brew audit --new` do job da fórmula passa no tap local desde a v1.0.0, mas a
+notabilidade só é conferida dentro do próprio homebrew-core: ela é o que falta.
 
-Quando ele passar:
+Quando o repositório for notável:
 
 1. Copie `homebrew/octobrew-tui.rb` para `Formula/o/octobrew-tui.rb` num fork do
    [Homebrew/homebrew-core](https://github.com/Homebrew/homebrew-core) (sem o

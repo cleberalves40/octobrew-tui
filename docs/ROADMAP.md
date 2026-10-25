@@ -74,8 +74,8 @@ núcleo que fala com o gerenciador de pacotes foi reescrito: `core/brew` no luga
   repositório (`homebrew/`), validada no CI com `brew audit --strict --online`, a
   instalação a partir do código e o `brew test` (veja `docs/RELEASING.md`).
 - Tags e releases a partir da v0.1.0.
-- Envio ao homebrew-core quando o projeto atender aos critérios de notabilidade: o
-  `brew audit --new` do CI mostra o que falta.
+- Envio ao homebrew-core quando o projeto atender aos critérios de notabilidade (o
+  `brew audit --new` já passa; a notabilidade só o core confere).
 - Homebrew no Linux: o núcleo já procura o brew em `/home/linuxbrew/.linuxbrew`, e a
   fórmula não tem nada específico do macOS; falta um job de Linux com o Homebrew.
 - Bottles (binários pré-compilados no tap, com `brew test-bot`), para não compilar na

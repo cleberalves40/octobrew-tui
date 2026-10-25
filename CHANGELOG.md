@@ -22,7 +22,8 @@ próprio Homebrew, e a interface e as teclas ficam estáveis.
 - CI: o job **Fórmula** (`ci/formula-test.sh`), que põe a fórmula num tap local e roda
   o `brew style`, o `brew audit --strict --online`, a instalação a partir do código, o
   `brew test`, o `brew linkage --test` e o programa instalado num pseudo-terminal; o
-  `brew audit --new` só informa o que o homebrew-core ainda recusaria. O job do macOS
+  `brew audit --new`, as regras de fórmula nova do homebrew-core, só informa (a
+  notabilidade do repositório só é conferida dentro do core). O job do macOS
   confere se a fórmula não está à frente do `CMakeLists.txt` e se o `sha256` bate.
 - `docs/RELEASING.md`: o processo de versão (um PR por versão contra o `main`, a tag, a
   fórmula, o tap) e o envio ao homebrew-core.

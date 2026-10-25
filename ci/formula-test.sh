@@ -24,8 +24,10 @@ fi
 echo "== brew style e brew audit"
 brew style "$tap/$name"
 brew audit --strict --online "$tap/$name"
-echo "== brew audit --new (as regras do homebrew-core; só informa)"
-brew audit --new "$tap/$name" || echo "(o homebrew-core ainda recusaria: veja acima)"
+# As regras de fórmula nova do homebrew-core; a notabilidade do repositório só é
+# conferida dentro do próprio core.
+echo "== brew audit --new (só informa)"
+brew audit --new "$tap/$name" || echo "(o brew audit --new recusaria: veja acima)"
 
 echo "== instalação a partir do código da tag"
 brew install --build-from-source --verbose "$tap/$name"
