@@ -138,6 +138,47 @@ const char kKittyInfo[] = R"json({
   }]
 })json";
 
+// "brew install --dry-run --formula figlet wget2" (brew 7.0.10), com as linhas
+// de download que o brew intercala.
+const char kInstallDryRun[] = "==> Would install 2 formulae:\n"
+                              "figlet  2.2.5\n"
+                              "wget2   2.3.0\n"
+                              "==> Downloading https://ghcr.io/v2/homebrew/core/figlet/manifests/2.2.5\n"
+                              "==> Downloading https://ghcr.io/v2/homebrew/core/wget2/manifests/2.3.0\n"
+                              "==> Would install 2 dependencies for wget2:\n"
+                              "libgpg-error  1.61\n"
+                              "lzlib         1.16\n";
+
+// "brew install --dry-run --cask kitty"
+const char kInstallCaskDryRun[] = "==> Would install 1 cask:\nkitty\n";
+
+// "brew upgrade --dry-run": as fórmulas e os casks em resumos separados, e
+// os casks desativados como aviso (no stderr).
+const char kUpgradeDryRun[] = "==> Would upgrade 1 outdated package:\n"
+                              "curl 8.9.1 -> 8.10.0\n"
+                              "==> Would upgrade 1 outdated package:\n"
+                              "docker 4.38.0 -> 4.40.0\n";
+const char kUpgradeDryRunErr[] = "Warning: Not upgrading alacritty, it is disabled because it does not pass the "
+                                 "macOS Gatekeeper check! It was disabled on 2026-09-01.\n";
+
+// "brew autoremove --dry-run"
+const char kAutoremoveDryRun[] = "==> Would autoremove 2 unneeded formulae:\nlibgpg-error\nlzlib\n";
+
+// "brew cleanup --dry-run --prune=all"
+const char kCleanupDryRun[] =
+    "Would remove: /opt/homebrew/Cellar/curl/8.9.0 (558 files, 4.7MB)\n"
+    "Would remove: /Users/x/Library/Caches/Homebrew/downloads/abc--curl-8.9.0.bottle.tar.gz (1.5MB)\n"
+    "==> This operation would free approximately 6.2MB of disk space.\n";
+
+// Um cask com instalador .pkg (pede o sudo), no formato do "brew info --json=v2 --cask".
+const char kPkgCaskInfo[] = R"json({"formulae": [], "casks": [
+  {"token": "zoom", "full_token": "zoom", "tap": "homebrew/cask", "version": "7.0.0",
+   "artifacts": [{"pkg": ["zoomusInstallerFull.pkg"]},
+                 {"uninstall": [{"launchctl": "us.zoom.ZoomDaemon", "pkgutil": "us.zoom.pkg.videomeeting"}]}]},
+  {"token": "kitty", "full_token": "kitty", "tap": "homebrew/cask", "version": "0.49.2",
+   "artifacts": [{"app": ["kitty.app"]}, {"zap": [{"launchctl": "x", "trash": ["~/.config/kitty"]}]}]}
+]})json";
+
 // Uma string JSON com o texto (para montar o envelope JWS).
 inline std::string quoted(const std::string &s)
 {
@@ -163,8 +204,10 @@ inline std::string jws(const std::string &payload)
 /**
  * brew falso que responde como o brew 7.0.10: os diretórios (--cellar,
  * --caskroom, --cache, todos dentro de dir), --version, o info dos
- * instalados (kInstalledJson), o info de curl e kitty e o list. extra vem
- * antes, para mudar uma resposta.
+ * instalados (kInstalledJson), o info de curl e kitty e o list. As prévias
+ * (--dry-run) devolvem o arquivo <verbo>-dry.txt, se houver; as operações
+ * escrevem "executando <verbo>" e falham se houver <verbo>.rc; o bundle dump
+ * grava um Brewfile no --file. extra vem antes, para mudar uma resposta.
  */
 struct FakeBrew {
     TempDir dir;
@@ -176,22 +219,59 @@ struct FakeBrew {
         writeFile(dir.file("installed.json"), kInstalledJson);
         writeFile(dir.file("curl.json"), kCurlInfo);
         writeFile(dir.file("kitty.json"), kKittyInfo);
+        const std::string d = dir.path;
         path = fakeBrew(dir, log,
                         extra + "\n"
+                        "D='" + d + "'\n"
+                        "fail() { [ -f \"$D/$1.rc\" ] && { echo 'Warning: aviso' >&2; echo \"Error: $1 falhou\" >&2; exit 1; }; return 0; }\n"
                         "case \"$1\" in\n"
-                        "--cellar) echo '" + dir.file("Cellar") + "' ;;\n"
-                        "--caskroom) echo '" + dir.file("Caskroom") + "' ;;\n"
-                        "--cache) echo '" + dir.file("cache") + "' ;;\n"
+                        "--cellar) echo \"$D/Cellar\" ;;\n"
+                        "--caskroom) echo \"$D/Caskroom\" ;;\n"
+                        "--cache) echo \"$D/cache\" ;;\n"
                         "--version) echo 'Homebrew 7.0.10'; echo 'Homebrew/homebrew-core (git revision x)' ;;\n"
                         "info)\n"
                         "  case \"$3\" in\n"
-                        "  --installed) cat '" + dir.file("installed.json") + "' ;;\n"
-                        "  *) f='" + dir.path + "/'\"$4\".json\n"
+                        "  --installed) cat \"$D/installed.json\" ;;\n"
+                        "  --cask) f=\"$D/$4.json\"; [ -f \"$f\" ] && cat \"$f\" || echo '{\"formulae\": [], \"casks\": []}' ;;\n"
+                        "  *) f=\"$D/$4.json\"\n"
                         "     [ -f \"$f\" ] && cat \"$f\" && exit 0\n"
                         "     echo \"Error: No available formula with the name \\\"$4\\\".\" >&2; exit 1 ;;\n"
                         "  esac ;;\n"
                         "list) echo /opt/homebrew/Cellar/curl/8.9.1/bin/curl; echo /opt/homebrew/Cellar/curl/8.9.1/lib/libcurl.4.dylib ;;\n"
-                        "esac\n");
+                        "install|upgrade|autoremove|cleanup)\n"
+                        "  if [ \"$2\" = --dry-run ]; then\n"
+                        "    fail \"$1-dry\"\n"
+                        "    [ -f \"$D/$1-dry.txt\" ] && cat \"$D/$1-dry.txt\"\n"
+                        "    exit 0\n"
+                        "  fi\n"
+                        "  echo \"executando $1\"; fail \"$1\" ;;\n"
+                        "uninstall|update|pin|unpin) echo \"executando $1\"; fail \"$1\" ;;\n"
+                        "bundle)\n"
+                        "  for a in \"$@\"; do case \"$a\" in --file=*) f=${a#--file=} ;; esac; done\n"
+                        "  echo \"executando bundle $2\"; fail bundle\n"
+                        "  [ \"$2\" = dump ] && echo 'brew \"curl\"' > \"$f\" ;;\n"
+                        "esac\n"
+                        "exit 0\n");
+    }
+
+    /** O que uma prévia (verbo --dry-run) imprime. */
+    void preview(const std::string &verb, const std::string &output) const
+    {
+        writeFile(dir.file(verb + "-dry.txt"), output);
+    }
+    /** A próxima operação verbo falha (sai com 1, com "Error: verbo falhou"). */
+    void failNext(const std::string &verb) const { writeFile(dir.file(verb + ".rc"), "1"); }
+    /** As chamadas que mudam algo: sem as consultas e sem as prévias. */
+    std::vector<std::string> operations() const
+    {
+        std::vector<std::string> out;
+        for (const auto &l : readLines(log)) {
+            const std::string verb = l.substr(0, l.find('|'));
+            if (verb.rfind("--", 0) == 0 || verb == "info" || verb == "list" || l.find("|--dry-run") != std::string::npos)
+                continue;
+            out.push_back(l);
+        }
+        return out;
     }
 
     /** O cache da API do brew 7, com kApiPayload. */

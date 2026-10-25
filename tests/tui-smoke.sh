@@ -2,7 +2,7 @@
 #
 # Teste de fumaça da interface num pseudo-terminal, com um brew falso: ela
 # precisa listar os pacotes, carregar os detalhes do selecionado, calcular os
-# tamanhos, abrir o menu (F9), passar à visão Repositório (i), abrir as
+# tamanhos, marcar um pacote (+), abrir o menu (F9), passar à visão Repositório (i), abrir as
 # Preferências (Alt+,) e sair com "q". Funciona com o script(1) do BSD/macOS
 # e com o do util-linux. Não precisa do Homebrew.
 #
@@ -71,6 +71,8 @@ keys() {
 	wait_for "tela-ok"
 	wait_for "Installed version:"   # curl, o selecionado: os detalhes carregaram
 	wait_for "3.00 KiB"
+	printf '+'          # curl, desatualizado: marcado para instalar
+	wait_for "Actions (1)"
 	printf '\033[20~'   # F9
 	wait_for "Refresh the package list"
 	printf '\033'
@@ -96,7 +98,7 @@ set -e
 plain "$work/screen.raw" >"$work/screen.txt"
 [ "$rc" -eq 0 ] || { tail -c 4000 "$work/screen.txt"; echo "FAIL: octobrew-tui terminou com status $rc" >&2; exit 1; }
 for text in "OctoBrew" "Installed packages" "tela-ok" "2 package(s)" "1 outdated" "Installed version:" "8.9.1" \
-	"3.00 KiB" "Refresh the package list" "Repository" "vim-remoto" "Preferences" "System (terminal colors)"; do
+	"3.00 KiB" "Actions (1)" "Refresh the package list" "Update Homebrew" "Repository" "vim-remoto" "Preferences" "System (terminal colors)"; do
 	grep -aq "$text" "$work/screen.txt" || {
 		tail -c 4000 "$work/screen.txt"
 		echo "FAIL: a tela não mostrou: $text" >&2

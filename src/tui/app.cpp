@@ -1,10 +1,13 @@
 #include "app.h"
 #include "i18n.h"
+#include "process.h"
 #include "theme.h"
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <ctime>
+#include <fstream>
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/mouse.hpp>
 #include <ftxui/component/screen_interactive.hpp>
@@ -17,25 +20,32 @@ namespace tui {
 namespace {
 
 // Teclas que o FTXUI entrega como sequência crua.
+const std::string kCtrlE = "\x05";
+const std::string kCtrlK = "\x0b";
 const std::string kCtrlL = "\x0c";
 const std::string kCtrlP = "\x10";
 const std::string kCtrlQ = "\x11";
 const std::string kCtrlR = "\x12";
+const std::string kCtrlU = "\x15";
 const std::string kAltA = "\x1b" "a";
 const std::string kAltB = "\x1b" "b";
+const std::string kAltC = "\x1b" "c";
 const std::string kAltD = "\x1b" "d";
 const std::string kAltI = "\x1b" "i";
 const std::string kAltJ = "\x1b" "j";
+const std::string kAltM = "\x1b" "m";
 const std::string kAltT = "\x1b" "t";
 const std::string kAltZ = "\x1b" "z";
 const std::string kAltComma = "\x1b" ",";
 const std::string kCtrlF = "\x06";
 const std::string kShiftF3 = "\x1b[1;2R";   // xterm; o FTXUI não tem um evento próprio
 
-enum Menus { FileMenu = 0, SearchMenu, HelpMenu };
+enum Menus { FileMenu = 0, SearchMenu, ActionsMenu, HelpMenu };
 
 // Linhas fixas da tela: título, separadores, cabeçalho, abas, status e teclas.
 constexpr int kFixedLines = 9;
+// Itens de uma lista mostrados no diálogo da transação; a lista completa vai à Saída.
+constexpr size_t kDialogItems = 10;
 
 // Remove o último caractere UTF-8 (Backspace no campo de texto).
 void popUtf8(std::string &s)
@@ -46,6 +56,43 @@ void popUtf8(std::string &s)
         if ((c & 0xC0) != 0x80)
             break;
     }
+}
+
+std::string join(const std::vector<std::string> &v, const std::string &sep)
+{
+    std::string out;
+    for (size_t i = 0; i < v.size(); ++i)
+        out += (i ? sep : std::string()) + v[i];
+    return out;
+}
+
+// Até kDialogItems itens, um por linha, e "… e mais N".
+std::string bulletList(const std::vector<std::string> &items)
+{
+    std::string out;
+    for (size_t i = 0; i < items.size() && i < kDialogItems; ++i)
+        out += "  • " + items[i] + "\n";
+    if (items.size() > kDialogItems)
+        out += "  " + i18n::trf("… and %1 more (see the Output tab)", {std::to_string(items.size() - kDialogItems)})
+               + "\n";
+    return out;
+}
+
+std::vector<std::string> names(const std::vector<octo::Package> &packages)
+{
+    std::vector<std::string> out;
+    for (const auto &p : packages)
+        out.push_back(p.kind == octo::Kind::Cask ? p.fullName + " (cask)" : p.fullName);
+    return out;
+}
+
+std::vector<std::string> caskTokens(const std::vector<octo::Package> &packages)
+{
+    std::vector<std::string> out;
+    for (const auto &p : packages)
+        if (p.kind == octo::Kind::Cask)
+            out.push_back(p.fullName);
+    return out;
 }
 
 std::string detailsKey(const octo::Package &p)
@@ -61,6 +108,7 @@ App::App(const Options &options)
     , m_iconMode(iconModeFromString(options.iconMode.empty() ? m_settings.value("icons", "nerd")
                                                              : options.iconMode))
     , m_remoteView(options.remote)
+    , m_sudoPath(options.sudoPath.empty() ? std::string("/usr/bin/sudo") : options.sudoPath)
 {
     const std::string lang = options.language.empty() ? m_settings.value("language", "system")
                                                       : options.language;
@@ -206,9 +254,13 @@ void App::applyListing(const Listing &l)
     }
     rebuild();
 
-    if (l.error.empty()) {
+    if (l.error.empty() && m_operationError.empty()) {
         m_status = i18n::tr("Ready.");
         m_error = false;
+    } else if (l.error.empty()) {
+        // A listagem depois de uma operação que falhou não esconde o erro.
+        m_status = i18n::trf("ERROR: %1", {m_operationError});
+        m_error = true;
     }
     int formulae = 0, casks = 0;
     for (const auto &p : m_installed)
@@ -432,6 +484,8 @@ ViewState App::viewState()
     s.iconMode = m_iconMode;
     s.sortChooserOpen = m_sortChooser;
     s.sortChooserIndex = m_sortChooserIndex;
+    s.toInstall = m_toInstall;
+    s.toRemove = m_toRemove;
     s.dialog = m_dialog;
     s.themeId = m_themeId;
     s.findOpen = m_findOpen;
@@ -486,10 +540,403 @@ void App::setTab(int tab)
 
 void App::quit()
 {
-    // Nesta versão só há leitura: a saída nunca interrompe uma alteração.
+    // Uma listagem ou prévia pode ser abandonada (a saída espera o brew
+    // terminar); uma transação, não.
+    if (m_inOperation) {
+        m_status = i18n::tr("Wait for the current operation to finish.");
+        return;
+    }
     m_cancelSizes = true;
     if (m_screen)
         m_screen->Exit();
+}
+
+// ---------------------------------------------------------------------------
+// Marcas e transações (aba Ações do OctoPkg)
+// ---------------------------------------------------------------------------
+
+void App::markInstall()
+{
+    const octo::Package *p = current();
+    if (!p)
+        return;
+    if (p->pinned) {
+        m_status = i18n::trf("%1 is pinned.", {p->name});
+        return;
+    }
+    // Instalar um instalado só faz sentido se ele está desatualizado (o brew
+    // install o atualiza).
+    if (p->installed && p->newVersion.empty() && !m_toInstall.count(p->key())) {
+        m_status = i18n::trf("%1 is already installed and up to date.", {p->name});
+        return;
+    }
+    // Como no OctoPkg, + de novo desmarca; instalar e remover se excluem.
+    if (!m_toInstall.erase(p->key())) {
+        m_toInstall.insert(p->key());
+        m_toRemove.erase(p->key());
+    }
+}
+
+void App::markRemove()
+{
+    const octo::Package *p = current();
+    if (!p)
+        return;
+    if (!p->installed) {
+        m_status = i18n::tr("Only installed packages can be removed.");
+        return;
+    }
+    if (octo::isForbidden(*p)) {
+        m_status = i18n::trf("%1 cannot be removed.", {p->name});
+        return;
+    }
+    if (p->pinned) {
+        m_status = i18n::trf("%1 is pinned.", {p->name});
+        return;
+    }
+    if (!m_toRemove.erase(p->key())) {
+        m_toRemove.insert(p->key());
+        m_toInstall.erase(p->key());
+    }
+}
+
+void App::clearMarks()
+{
+    m_toInstall.clear();
+    m_toRemove.clear();
+}
+
+std::vector<octo::Package> App::packagesFor(const std::set<std::string> &keys) const
+{
+    // Pela ordem: os instalados, depois o repositório (um marcado na visão
+    // Repositório continua valendo na visão Instalados).
+    std::vector<octo::Package> out;
+    std::set<std::string> found;
+    for (const auto *list : {&m_installed, &m_remote})
+        for (const auto &p : *list)
+            if (keys.count(p.key()) && found.insert(p.key()).second)
+                out.push_back(p);
+    return out;
+}
+
+std::string App::snapshotDir() const
+{
+    const std::string &path = m_settings.path();
+    const size_t slash = path.rfind('/');
+    return (slash == std::string::npos ? std::string(".") : path.substr(0, slash)) + "/snapshots";
+}
+
+DialogField App::snapshotField(bool checked, const std::string &file) const
+{
+    // O Boot Environment do OctoPkg, no Homebrew: o estado instalado num Brewfile.
+    DialogField f;
+    f.kind = DialogField::Check;
+    f.label = i18n::tr("Save a snapshot (Brewfile) before the transaction");
+    f.checked = checked;
+    f.hint = i18n::trf("File: %1", {file});
+    return f;
+}
+
+void App::actApply()
+{
+    if (refuseWhileBusy())
+        return;
+    if (m_toInstall.empty() && m_toRemove.empty()) {
+        showMessage(i18n::tr("Actions"), i18n::tr("No packages marked. Use + to install and - to remove."));
+        return;
+    }
+    const std::vector<octo::Package> rem = packagesFor(m_toRemove);
+    const std::vector<octo::Package> ins = packagesFor(m_toInstall);
+    // O brew não remove o que outros instalados usam: eles vão juntos, como
+    // no "pkg remove -R" do OctoPkg, e o diálogo vira Aviso.
+    const std::vector<std::string> remKeys(m_toRemove.begin(), m_toRemove.end());
+    const auto closure = octo::dependentsClosure(m_installed, remKeys);
+    const std::vector<octo::Package> deps = packagesFor(std::set<std::string>(closure.begin(), closure.end()));
+    for (const auto &p : deps)
+        if (octo::isForbidden(p) || p.pinned) {
+            showMessage(i18n::tr("Error"), i18n::trf("%1 depends on a package marked for removal and cannot be removed.",
+                                                     {p.fullName}));
+            return;
+        }
+    runTask(i18n::tr("Collecting transaction data…"), [this, rem, ins, deps]() -> Op {
+        octo::TransactionPreview install;
+        if (!ins.empty())
+            install = m_mgr.previewInstall(ins);
+        std::vector<octo::Package> all = rem;
+        all.insert(all.end(), deps.begin(), deps.end());
+        all.insert(all.end(), ins.begin(), ins.end());
+        const std::vector<std::string> sudo = m_mgr.casksNeedingSudo(caskTokens(all));
+        return [this, install, rem, deps, ins, sudo] { confirmTransaction(install, rem, deps, ins, sudo); };
+    });
+}
+
+void App::confirmTransaction(const octo::TransactionPreview &install, const std::vector<octo::Package> &rem,
+                             const std::vector<octo::Package> &deps, const std::vector<octo::Package> &ins,
+                             const std::vector<std::string> &sudoCasks)
+{
+    std::vector<octo::Package> removal = rem;
+    removal.insert(removal.end(), deps.begin(), deps.end());
+    const std::vector<std::string> retrieved = install.items();
+    const std::vector<std::string> removed = names(removal);
+
+    std::string message;
+    if (!retrieved.empty()) {
+        message += retrieved.size() == 1 ? i18n::tr("The following package needs to be retrieved")
+                                         : i18n::trf("The following %1 packages need to be retrieved",
+                                                     {std::to_string(retrieved.size())});
+        message += "\n" + bulletList(retrieved) + "\n";
+    }
+    if (!removed.empty()) {
+        message += removed.size() == 1 ? i18n::tr("The following package will be removed")
+                                       : i18n::trf("The following %1 packages will be removed",
+                                                   {std::to_string(removed.size())});
+        message += "\n" + bulletList(removed);
+        if (!deps.empty())
+            message += i18n::trf("(%1 of them depend on the marked packages)", {std::to_string(deps.size())}) + "\n";
+        message += "\n";
+    }
+    if (retrieved.empty() && removed.empty())
+        message += i18n::tr("Nothing to do: the marked packages are already in this state.") + "\n\n";
+    const bool terminal = !sudoCasks.empty() && !sudoReady();
+    if (!sudoCasks.empty())
+        message += i18n::trf("Needs sudo: %1", {join(sudoCasks, ", ")})
+                   + (terminal ? "\n" + i18n::tr("The screen will be suspended while sudo asks for your password.")
+                               : std::string())
+                   + "\n\n";
+    message += i18n::tr("Confirm?");
+
+    log(i18n::tr("Transaction:"));
+    for (const auto &i : retrieved)
+        log("  + " + i);
+    for (const auto &i : removed)
+        log("  - " + i);
+    for (const auto &w : install.warnings)
+        log(i18n::trf("WARNING: %1", {w}));
+
+    // Como no OctoPkg: "Aviso" quando a remoção leva mais pacotes do que os marcados.
+    const bool danger = !deps.empty();
+    const std::string file = snapshotDir() + "/" + octo::snapshotName(std::time(nullptr));
+    // O OctoPkg desmarca o Boot Environment na remoção.
+    std::vector<DialogField> fields{snapshotField(!ins.empty(), file)};
+    showForm(danger ? i18n::tr("Warning") : i18n::tr("Confirmation"), message, fields, danger,
+             [this, removal, ins, file, terminal](const std::vector<DialogField> &f) {
+                 const bool withSnapshot = !f.empty() && f[0].checked;
+                 std::vector<std::string> commands;
+                 if (withSnapshot)
+                     commands.push_back(m_mgr.commandLine({"bundle", "dump", "--file=" + file, "--force"}));
+                 for (const auto &a : octo::Manager::uninstallArgs(removal))
+                     commands.push_back(m_mgr.commandLine(a));
+                 for (const auto &a : octo::Manager::installArgs(ins))
+                     commands.push_back(m_mgr.commandLine(a));
+                 runOperation(
+                     ins.empty() ? i18n::tr("Removing selected packages...")
+                                 : i18n::tr("Installing selected packages..."),
+                     join(commands, "; "),
+                     [this, withSnapshot, file, removal, ins](const octo::OutputFn &out, bool interactive) {
+                         // Sem shell: se o snapshot falhar, nada é removido nem instalado.
+                         if (withSnapshot)
+                             m_mgr.snapshot(file, out);
+                         if (!removal.empty())
+                             m_mgr.uninstall(removal, out, interactive);
+                         if (!ins.empty())
+                             m_mgr.install(ins, out, interactive);
+                     },
+                     [this, removal, ins, withSnapshot, file] {
+                         for (const auto &p : removal)
+                             m_toRemove.erase(p.key());
+                         for (const auto &p : ins)
+                             m_toInstall.erase(p.key());
+                         std::string summary;
+                         if (withSnapshot)
+                             summary += i18n::trf("Snapshot: %1", {file}) + "\n";
+                         if (!ins.empty())
+                             summary += i18n::trf("Installed: %1", {join(names(ins), ", ")}) + "\n";
+                         if (!removal.empty())
+                             summary += i18n::trf("Removed: %1", {join(names(removal), ", ")}) + "\n";
+                         showMessage(i18n::tr("Command finished OK!"), summary + i18n::tr("Details in the Output tab."));
+                     },
+                     terminal);
+             });
+}
+
+void App::actUpgrade()
+{
+    if (refuseWhileBusy())
+        return;
+    std::map<std::string, std::string> casks;   // os desatualizados que são casks, pelo nome
+    for (const auto &p : m_installed)
+        if (p.kind == octo::Kind::Cask)
+            casks[p.name] = p.fullName;
+    runTask(i18n::tr("Collecting transaction data…"), [this, casks]() -> Op {
+        const octo::TransactionPreview p = m_mgr.previewUpgrade();
+        std::vector<std::string> tokens;
+        for (const auto &i : p.items()) {
+            const auto it = casks.find(octo::itemName(i));
+            if (it != casks.end())
+                tokens.push_back(it->second);
+        }
+        const std::vector<std::string> sudo = m_mgr.casksNeedingSudo(tokens);
+        return [this, p, sudo] {
+            for (const auto &w : p.warnings)
+                log(i18n::trf("WARNING: %1", {w}));
+            if (p.count() == 0) {
+                showMessage(i18n::tr("System upgrade"), i18n::tr("There are no new updates available!"));
+                return;
+            }
+            const std::vector<std::string> items = p.items();
+            std::string message = items.size() == 1 ? i18n::tr("The following package needs to be retrieved")
+                                                    : i18n::trf("The following %1 packages need to be retrieved",
+                                                                {std::to_string(items.size())});
+            message += "\n" + bulletList(items) + "\n";
+            const bool terminal = !sudo.empty() && !sudoReady();
+            if (!sudo.empty())
+                message += i18n::trf("Needs sudo: %1", {join(sudo, ", ")})
+                           + (terminal ? "\n" + i18n::tr("The screen will be suspended while sudo asks for your password.")
+                                       : std::string())
+                           + "\n\n";
+            message += i18n::tr("Pinned packages are not upgraded.") + "\n\n" + i18n::tr("Confirm?");
+            log(i18n::tr("Transaction:"));
+            for (const auto &i : items)
+                log("  + " + i);
+            const std::string file = snapshotDir() + "/" + octo::snapshotName(std::time(nullptr));
+            showForm(i18n::tr("System upgrade"), message, {snapshotField(true, file)}, false,
+                     [this, file, terminal](const std::vector<DialogField> &f) {
+                         const bool withSnapshot = !f.empty() && f[0].checked;
+                         runOperation(i18n::tr("Installing updates..."),
+                                      (withSnapshot ? m_mgr.commandLine({"bundle", "dump", "--file=" + file, "--force"}) + "; "
+                                                    : std::string())
+                                          + m_mgr.commandLine({"upgrade"}),
+                                      [this, withSnapshot, file](const octo::OutputFn &out, bool interactive) {
+                                          if (withSnapshot)
+                                              m_mgr.snapshot(file, out);
+                                          m_mgr.upgrade(out, interactive);
+                                      },
+                                      [this, withSnapshot, file] {
+                                          showMessage(i18n::tr("Command finished OK!"),
+                                                      (withSnapshot ? i18n::trf("Snapshot: %1", {file}) + "\n"
+                                                                    : std::string())
+                                                          + i18n::tr("Details in the Output tab."));
+                                      },
+                                      terminal);
+                     });
+        };
+    });
+}
+
+void App::actUpdate()
+{
+    runOperation(i18n::tr("Updating Homebrew and the package list…"), m_mgr.commandLine({"update"}),
+                 [this](const octo::OutputFn &out, bool) { m_mgr.update(out); },
+                 // O cache da API mudou: a visão Repositório relê na próxima vez.
+                 [this] { m_hasRemote = m_remoteView; });
+}
+
+void App::actClean()
+{
+    if (refuseWhileBusy())
+        return;
+    runTask(i18n::tr("Collecting transaction data…"), [this]() -> Op {
+        const octo::TransactionPreview p = m_mgr.previewCleanup();
+        return [this, p] {
+            if (p.count() == 0) {
+                showMessage(i18n::tr("Clean the local cache"), i18n::tr("Nothing to clean."));
+                return;
+            }
+            log(i18n::trf("brew cleanup would remove %1 item(s):", {std::to_string(p.count())}));
+            for (const auto &i : p.items())
+                log("  - " + i);
+            std::string message = i18n::trf("brew cleanup would remove %1 item(s) (old versions and downloads; see the Output tab).",
+                                             {std::to_string(p.count())});
+            if (!p.freed.empty())
+                message += "\n" + i18n::trf("It would free approximately %1.", {p.freed});
+            showConfirm(i18n::tr("Clean the local cache"), message + "\n\n" + i18n::tr("Confirm?"), false, [this] {
+                runOperation(i18n::tr("Cleaning the local cache..."), m_mgr.commandLine({"cleanup", "--prune=all"}),
+                             [this](const octo::OutputFn &out, bool) { m_mgr.cleanup(out); }, nullptr);
+            });
+        };
+    });
+}
+
+void App::actAutoremove()
+{
+    if (refuseWhileBusy())
+        return;
+    runTask(i18n::tr("Collecting transaction data…"), [this]() -> Op {
+        const octo::TransactionPreview p = m_mgr.previewAutoremove();
+        return [this, p] {
+            if (p.count() == 0) {
+                showMessage(i18n::tr("Remove unneeded dependencies"), i18n::tr("There are no unneeded dependencies."));
+                return;
+            }
+            const std::vector<std::string> items = p.items();
+            const std::string message = i18n::trf("The following %1 packages will be removed",
+                                                  {std::to_string(items.size())})
+                                        + "\n" + bulletList(items) + "\n"
+                                        + i18n::tr("They were installed as dependencies and nothing uses them anymore.")
+                                        + "\n\n" + i18n::tr("Confirm?");
+            log(i18n::tr("Transaction:"));
+            for (const auto &i : items)
+                log("  - " + i);
+            showConfirm(i18n::tr("Remove unneeded dependencies"), message, false, [this] {
+                runOperation(i18n::tr("Removing unneeded dependencies…"), m_mgr.commandLine({"autoremove"}),
+                             [this](const octo::OutputFn &out, bool) { m_mgr.autoremove(out); }, nullptr);
+            });
+        };
+    });
+}
+
+void App::actPin(bool pin)
+{
+    const octo::Package *p = current();
+    if (!p || !p->installed) {
+        m_status = i18n::tr("Select an installed package.");
+        return;
+    }
+    if (p->pinned == pin) {
+        m_status = pin ? i18n::trf("%1 is pinned.", {p->name}) : i18n::trf("%1 is not pinned.", {p->name});
+        return;
+    }
+    const octo::Package pkg = *p;
+    runOperation(pin ? i18n::tr("Pinning…") : i18n::tr("Unpinning…"),
+                 m_mgr.commandLine(octo::Manager::pinArgs(pkg, pin)),
+                 [this, pkg, pin](const octo::OutputFn &out, bool) { m_mgr.pin(pkg, pin, out); }, nullptr);
+}
+
+void App::actRestore()
+{
+    if (refuseWhileBusy())
+        return;
+    const std::string dir = snapshotDir();
+    const std::vector<std::string> snapshots = octo::listSnapshots(dir);
+    if (snapshots.empty()) {
+        showMessage(i18n::tr("Restore a snapshot"), i18n::trf("No snapshots in %1 yet.", {dir}));
+        return;
+    }
+    DialogField f;
+    f.kind = DialogField::Choice;
+    f.label = i18n::tr("Snapshot:");
+    f.choices = snapshots;
+    f.hint = i18n::tr("Installs what is missing from it; nothing is removed or upgraded.");
+    showForm(i18n::tr("Restore a snapshot"), i18n::trf("Snapshots in %1", {dir}), {f}, false,
+             [this, dir, snapshots](const std::vector<DialogField> &fields) {
+                 const std::string file = dir + "/" + snapshots[static_cast<size_t>(fields[0].choice)];
+                 // Um cask do Brewfile pode pedir o sudo.
+                 bool casks = false;
+                 std::ifstream in(file);
+                 for (std::string line; std::getline(in, line);)
+                     casks = casks || line.rfind("cask ", 0) == 0;
+                 runOperation(i18n::tr("Restoring the snapshot…"),
+                              m_mgr.commandLine({"bundle", "install", "--file=" + file, "--no-upgrade"}),
+                              [this, file](const octo::OutputFn &out, bool interactive) {
+                                  m_mgr.restore(file, out, interactive);
+                              },
+                              [this, file] {
+                                  showMessage(i18n::tr("Command finished OK!"),
+                                              i18n::trf("Restored: %1", {file}) + "\n" + i18n::tr("Details in the Output tab."));
+                              },
+                              casks && !sudoReady());
+             });
+    m_dialog.focus = 0;
 }
 
 void App::actAbout()
@@ -717,6 +1164,185 @@ bool App::handleFindEvent(const Event &event)
 }
 
 // ---------------------------------------------------------------------------
+// Execução: prévias e operações
+// ---------------------------------------------------------------------------
+
+bool App::refuseWhileBusy()
+{
+    if (!m_busy)
+        return false;
+    m_status = i18n::tr("Wait for the current operation to finish.");
+    return true;
+}
+
+void App::runTask(const std::string &status, const Task &task)
+{
+    if (refuseWhileBusy())
+        return;
+    const auto attempt = [task](std::string *error) -> Op {
+        try {
+            return task();
+        } catch (const std::exception &e) {
+            *error = e.what();
+        }
+        return nullptr;
+    };
+    const auto apply = [this](const Op &then, const std::string &error) {
+        m_busy = false;
+        m_status = i18n::tr("Ready.");
+        if (!error.empty()) {
+            m_error = true;
+            m_status = i18n::trf("ERROR: %1", {error});
+            log(m_status);
+            showMessage(i18n::tr("Error"), error);
+            return;
+        }
+        m_error = false;
+        if (then)
+            then();
+    };
+    if (!m_screen) {   // testes
+        std::string error;
+        const Op then = attempt(&error);
+        apply(then, error);
+        return;
+    }
+    m_busy = true;
+    m_error = false;
+    m_status = status;
+    log(status);
+    m_cancelSizes = true;   // um cálculo de tamanhos em andamento para logo
+    if (m_worker.joinable())
+        m_worker.join();
+    m_cancelSizes = false;
+    m_sizing = false;
+    ++m_generation;
+    m_worker = std::thread([this, attempt, apply] {
+        std::string error;
+        const Op then = attempt(&error);
+        m_screen->Post([apply, then, error] { apply(then, error); });
+        m_screen->PostEvent(Event::Custom);
+    });
+}
+
+bool App::sudoReady() const
+{
+    // "sudo -n true": sai com 0 se o sudo não vai pedir a senha agora.
+    const auto r = octo::runProcess({m_sudoPath, "-n", "true"}, 10000);
+    return r.started && !r.timedOut && r.status == 0;
+}
+
+void App::appendOutput(const std::string &chunk)
+{
+    // Linha a linha; "\r" (barras de progresso) recomeça a linha atual.
+    for (char c : chunk) {
+        if (c == '\n') {
+            m_log.push_back("  " + m_partial);
+            m_partial.clear();
+        } else if (c == '\r') {
+            m_partial.clear();
+        } else {
+            m_partial += c;
+        }
+    }
+    while (m_log.size() > 2000)
+        m_log.erase(m_log.begin());
+}
+
+void App::runOperation(const std::string &status, const std::string &command, const Work &work,
+                       const Op &onSuccess, bool needsTerminal)
+{
+    if (refuseWhileBusy())
+        return;
+    m_operationError.clear();
+    log(command);
+    // Como no OctoPkg, a aba Saída acompanha a transação.
+    m_tab = OutputTab;
+    m_contentFocused = false;
+    m_partial.clear();
+    const auto attempt = [work](const octo::OutputFn &out, bool interactive) {
+        try {
+            work(out, interactive);
+        } catch (const std::exception &e) {
+            return std::string(e.what());
+        }
+        return std::string();
+    };
+
+    if (!m_screen) {   // testes
+        finishOperation(attempt([this](const std::string &c) { appendOutput(c); }, needsTerminal), onSuccess);
+        return;
+    }
+
+    // Uma operação para o cálculo dos tamanhos: a lista é refeita depois.
+    m_cancelSizes = true;
+    if (m_worker.joinable())
+        m_worker.join();
+    m_cancelSizes = false;
+    m_sizing = false;
+    ++m_generation;
+
+    if (needsTerminal) {
+        // O sudo pede a senha no terminal: a tela é suspensa enquanto isso, e
+        // a saída aparece no terminal e depois na aba Saída.
+        std::string error, captured;
+        m_screen->WithRestoredIO([&] {
+            std::printf("\noctobrew-tui — %s\n%s\n\n", i18n::trf("Running: %1", {command}).c_str(),
+                        i18n::tr("sudo may ask for your password.").c_str());
+            std::fflush(stdout);
+            error = attempt(
+                [&captured](const std::string &c) {
+                    std::fwrite(c.data(), 1, c.size(), stdout);
+                    std::fflush(stdout);
+                    captured += c;
+                },
+                true);
+        })();
+        appendOutput(captured);
+        finishOperation(error, onSuccess);
+        return;
+    }
+
+    m_busy = true;
+    m_inOperation = true;
+    m_error = false;
+    m_status = status;
+    m_worker = std::thread([this, attempt, onSuccess] {
+        const std::string error = attempt(
+            [this](const std::string &c) {
+                m_screen->Post([this, c] { appendOutput(c); });
+                m_screen->PostEvent(Event::Custom);
+            },
+            false);
+        m_screen->Post([this, error, onSuccess] { finishOperation(error, onSuccess); });
+        m_screen->PostEvent(Event::Custom);
+    });
+}
+
+void App::finishOperation(const std::string &error, const Op &onSuccess)
+{
+    m_busy = false;
+    m_inOperation = false;
+    if (!m_partial.empty())
+        appendOutput("\n");
+    if (!error.empty()) {
+        m_operationError = error;
+        m_error = true;
+        m_status = i18n::trf("ERROR: %1", {error});
+        log(m_status);
+        showMessage(i18n::tr("Error"), error);
+        refresh();   // a transação pode ter feito parte do trabalho
+        return;
+    }
+    m_error = false;
+    m_status = i18n::tr("Ready.");
+    log(i18n::tr("Command finished OK!"));
+    if (onSuccess)
+        onSuccess();
+    refresh();
+}
+
+// ---------------------------------------------------------------------------
 // Diálogos e menus
 // ---------------------------------------------------------------------------
 
@@ -726,6 +1352,17 @@ void App::showMessage(const std::string &title, const std::string &message)
     m_dialog.kind = Dialog::Message;
     m_dialog.title = title;
     m_dialog.message = message;
+}
+
+void App::showConfirm(const std::string &title, const std::string &message, bool danger, const Op &onYes)
+{
+    m_dialog = Dialog{};
+    m_dialog.kind = Dialog::Confirm;
+    m_dialog.title = title;
+    m_dialog.message = message;
+    m_dialog.danger = danger;
+    m_dialog.focus = danger ? 1 : 0;   // destrutivo: "Não" por padrão
+    m_onAccept = onYes;
 }
 
 void App::showForm(const std::string &title, const std::string &message, std::vector<DialogField> fields,
@@ -746,12 +1383,19 @@ void App::openMenu(int menu)
 {
     m_dialog = Dialog{};
     m_dialog.kind = Dialog::Menu;
-    m_dialog.menus = {i18n::tr("File"), i18n::tr("Search"), i18n::tr("Help")};
+    m_dialog.menus = {i18n::tr("File"), i18n::tr("Search"), i18n::tr("Actions"), i18n::tr("Help")};
     const bool byName = m_searchMode == model::SearchMode::Name;
     const auto sep = std::make_pair(std::string(), std::string());
     m_dialog.items = {
         {{i18n::tr("Refresh the package list"), "F5"},
          {i18n::tr("Switch between installed and repository packages"), "i"},
+         sep,
+         {i18n::tr("Update Homebrew"), "Ctrl+K"},
+         {i18n::tr("Install updates"), "Ctrl+U"},
+         {i18n::tr("Clean the local cache"), ""},
+         {i18n::tr("Remove unneeded dependencies"), ""},
+         sep,
+         {i18n::tr("Restore a snapshot…"), ""},
          sep,
          {i18n::tr("Preferences…"), "Alt+,"},
          {i18n::tr("Next theme"), "Alt+T"},
@@ -765,15 +1409,27 @@ void App::openMenu(int menu)
          sep,
          {i18n::tr("Find a package in the package list"), "Ctrl+L"},
          {i18n::tr("Find text in the tab"), "Ctrl+F"}},
+        {{i18n::tr("Mark for installation"), "+"},
+         {i18n::tr("Mark for removal"), "-"},
+         sep,
+         {i18n::tr("Apply"), "Alt+M"},
+         {i18n::tr("Cancel"), "Ctrl+E"},
+         sep,
+         {i18n::tr("Pin"), ""},
+         {i18n::tr("Unpin"), ""}},
         {{i18n::tr("Keyboard shortcuts"), "F1"}, {i18n::tr("About"), ""}},
     };
     m_menuActions = {
-        {[this] { refresh(); }, [this] { toggleView(); }, nullptr, [this] { actPreferences(); },
-         [this] { nextThemeKey(); }, nullptr, [this] { quit(); }},
+        {[this] { refresh(); }, [this] { toggleView(); }, nullptr, [this] { actUpdate(); },
+         [this] { actUpgrade(); }, [this] { actClean(); }, [this] { actAutoremove(); }, nullptr,
+         [this] { actRestore(); }, nullptr, [this] { actPreferences(); }, [this] { nextThemeKey(); }, nullptr,
+         [this] { quit(); }},
         {[this] { setSearchMode(model::SearchMode::Name); },
          [this] { setSearchMode(model::SearchMode::Description); }, nullptr,
          [this] { openCategoryChooser(); }, [this] { setCategory(std::string()); }, nullptr,
          [this] { m_filterMode = true; m_contentFocused = false; }, [this] { openFind(); }},
+        {[this] { markInstall(); }, [this] { markRemove(); }, nullptr, [this] { actApply(); },
+         [this] { clearMarks(); }, nullptr, [this] { actPin(true); }, [this] { actPin(false); }},
         {[this] { setTab(HelpTab); }, [this] { actAbout(); }},
     };
     m_dialog.menu = std::max(0, std::min(menu, static_cast<int>(m_dialog.menus.size()) - 1));
@@ -794,9 +1450,20 @@ bool App::handleDialogEvent(const Event &event)
             d = Dialog{};
         return true;
 
-    case Dialog::Confirm:   // sem confirmações nesta versão (só leitura)
-        if (event == Event::Return || event == Event::Escape)
+    case Dialog::Confirm:
+        if (event == Event::ArrowLeft || event == Event::ArrowRight || event == Event::Tab
+            || event == Event::TabReverse)
+            d.focus = 1 - d.focus;
+        else if (event == Event::Escape || event == Event::Character('n') || event == Event::Character('N'))
             d = Dialog{};
+        else if (event == Event::Return || event == Event::Character('y') || event == Event::Character('s')
+                 || event == Event::Character('Y') || event == Event::Character('S')) {
+            const bool yes = event != Event::Return || d.focus == 0;
+            const Op cb = m_onAccept;
+            d = Dialog{};
+            if (yes && cb)
+                cb();
+        }
         return true;
 
     case Dialog::Form: {
@@ -975,6 +1642,7 @@ bool App::handleEvent(const Event &event)
 
     // No teclado do Mac, as teclas F pedem o fn: cada uma tem uma alternativa.
     if (event == Event::F5 || raw == kCtrlR) {
+        m_operationError.clear();
         refresh();
         return true;
     }
@@ -1003,8 +1671,38 @@ bool App::handleEvent(const Event &event)
         openMenu(SearchMenu);
         return true;
     }
+    if (raw == kAltC) {
+        openMenu(ActionsMenu);
+        return true;
+    }
     if (raw == kAltJ) {
         openMenu(HelpMenu);
+        return true;
+    }
+    // Marcas do OctoPkg: + instalar, - remover (e Insert/Delete).
+    if (event == Event::Character('+') || event == Event::Insert) {
+        markInstall();
+        return true;
+    }
+    if (event == Event::Character('-') || event == Event::Delete) {
+        markRemove();
+        return true;
+    }
+    if (raw == kCtrlE) {
+        clearMarks();
+        return true;
+    }
+    // Ctrl+M é Enter no terminal: aplicar fica em Alt+M.
+    if (raw == kAltM) {
+        actApply();
+        return true;
+    }
+    if (raw == kCtrlK) {
+        actUpdate();
+        return true;
+    }
+    if (raw == kCtrlU) {
+        actUpgrade();
         return true;
     }
     if (event == Event::F11 || raw == kAltZ) {
@@ -1038,8 +1736,8 @@ bool App::handleEvent(const Event &event)
     }
     for (char digit = '1'; digit <= '6'; ++digit) {
         const std::string d(1, digit);
-        // Os números das abas do OctoPkg; Alt+n chega como ESC n. O 3 e o 5
-        // são das abas Ações e Notícias, que ainda não existem.
+        // Os números das abas do OctoPkg; Alt+n chega como ESC n. O 5 é o da
+        // aba Notícias, que ainda não existe.
         if (raw != d && raw != "\x1b" + d)
             continue;
         for (int t = 0; t < TabCount; ++t)

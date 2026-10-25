@@ -15,6 +15,7 @@
 // real evita conflito com uma declaração antecipada.
 #include <ftxui/component/screen_interactive.hpp>
 #include <map>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -28,6 +29,7 @@ struct Options {
     std::string settingsPath;    // vazio: ~/.config/octobrew-tui/config
     bool remote = false;         // começa na visão Repositório
     std::string theme;           // vazio: preferência salva ou "system"
+    std::string sudoPath;        // vazio: /usr/bin/sudo (só o "sudo -n true", para saber se pede senha)
 };
 
 /** Resultado de uma listagem, aplicado na thread da interface. */
@@ -49,7 +51,7 @@ public:
     int run();
 
     // Para os testes: o estado que a tela mostraria e o tratamento de eventos.
-    // Sem tela (run() não chamado), as listagens rodam na hora.
+    // Sem tela (run() não chamado), listagens, prévias e operações rodam na hora.
     ViewState viewState();
     bool handleEvent(const ftxui::Event &event);
     void applyListing(const Listing &listing);
@@ -69,6 +71,45 @@ public:
 private:
     using Op = std::function<void()>;
     using FormOp = std::function<void(const std::vector<DialogField> &)>;
+    /** Uma operação: recebe para onde mandar a saída e se o brew tem o terminal. */
+    using Work = std::function<void(const octo::OutputFn &, bool interactive)>;
+    /** Trabalho fora da interface (uma prévia); devolve o que aplicar nela. */
+    using Task = std::function<Op()>;
+
+    // Ações do OctoPkg, com o brew.
+    void markInstall();
+    void markRemove();
+    void clearMarks();
+    void actApply();
+    void confirmTransaction(const octo::TransactionPreview &install, const std::vector<octo::Package> &remove,
+                            const std::vector<octo::Package> &dependents, const std::vector<octo::Package> &toInstall,
+                            const std::vector<std::string> &sudoCasks);
+    void actUpgrade();
+    void actUpdate();
+    void actClean();
+    void actAutoremove();
+    void actPin(bool pin);
+    void actRestore();
+    /** Campo "criar um snapshot antes", o Boot Environment do octopkg-tui. */
+    DialogField snapshotField(bool checked, const std::string &file) const;
+    std::string snapshotDir() const;
+    std::vector<octo::Package> packagesFor(const std::set<std::string> &keys) const;
+
+    /** Prévia em segundo plano, com o status "Collecting transaction data…". */
+    void runTask(const std::string &status, const Task &task);
+    /**
+     * Executa work. Sem senha a pedir, roda em segundo plano, com a saída na
+     * aba Saída; se um cask precisar do sudo e ele pedir a senha
+     * (needsTerminal), devolve o terminal enquanto isso. Depois, onSuccess e
+     * uma nova listagem.
+     */
+    void runOperation(const std::string &status, const std::string &command, const Work &work, const Op &onSuccess,
+                      bool needsTerminal = false);
+    void finishOperation(const std::string &error, const Op &onSuccess);
+    /** O sudo roda sem pedir senha agora (credenciais em cache ou NOPASSWD)? */
+    bool sudoReady() const;
+    void appendOutput(const std::string &chunk);
+    bool refuseWhileBusy();
 
     void actAbout();
     void actPreferences();
@@ -86,6 +127,7 @@ private:
     void openSortChooser();
 
     void showMessage(const std::string &title, const std::string &message);
+    void showConfirm(const std::string &title, const std::string &message, bool danger, const Op &onYes);
     void showForm(const std::string &title, const std::string &message, std::vector<DialogField> fields,
                   bool danger, FormOp onAccept);
     bool handleDialogEvent(const ftxui::Event &event);
@@ -153,7 +195,15 @@ private:
     std::string m_findText;
     int m_findIndex = 0;                       // resultado atual, entre os encontrados
 
+    std::set<std::string> m_toInstall;         // Package::key() dos marcados com +
+    std::set<std::string> m_toRemove;          // e com -
+    std::string m_partial;                     // linha da Saída ainda sem "\n"
+    std::string m_operationError;              // fica no status até a próxima ação
+    bool m_inOperation = false;                // uma operação do brew: não dá para sair
+    std::string m_sudoPath;
+
     Dialog m_dialog;
+    Op m_onAccept;                             // Confirm
     FormOp m_onForm;                           // Form
     std::vector<std::vector<Op>> m_menuActions;
 

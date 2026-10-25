@@ -1,6 +1,7 @@
-// Integração contra o Homebrew real, só lendo: as mesmas consultas que a
-// interface faz, no Cellar, no Caskroom e no cache da API do sistema. Nada é
-// instalado nem removido (a Fase 1 é somente leitura).
+// Integração contra o Homebrew real: as mesmas consultas e prévias (dry-run)
+// que a interface faz, no Cellar, no Caskroom e no cache da API do sistema,
+// sem mudar nada. A transação de verdade (instalar e remover o figlet) só roda
+// com OCTOBREW_TEST_TRANSACTIONS=1, como no CI.
 //
 // OCTOBREW_TEST_BREW aponta o brew; sem a variável, os testes são ignorados.
 // tests/macos-e2e.sh a define.
@@ -107,4 +108,61 @@ TEST_CASE("versão do Homebrew", "[integration]")
 {
     REQUIRE_BREW();
     CHECK(mgr().version().rfind("Homebrew ", 0) == 0);
+}
+
+// --- v0.2.0: prévias (sempre) e uma transação de verdade (só no CI) ---
+
+TEST_CASE("prévias do brew real, sem mudar nada", "[integration][transaction]")
+{
+    REQUIRE_BREW();
+    // O figlet é pequeno e sem dependências; instalado ou não, a prévia funciona.
+    octo::Package figlet;
+    figlet.name = figlet.fullName = "figlet";
+    const auto install = mgr().previewInstall({figlet});
+    bool present = false;
+    for (const auto &p : installed())
+        present = present || p.key() == "f:figlet";
+    if (!present) {
+        REQUIRE(install.count() >= 1);
+        CHECK(octo::itemName(install.items("install").front()) == "figlet");
+    }
+    // Upgrade, autoremove e cleanup: o formato tem de ser lido, mesmo vazio.
+    CHECK_NOTHROW(mgr().previewUpgrade());
+    CHECK_NOTHROW(mgr().previewAutoremove());
+    CHECK_NOTHROW(mgr().previewCleanup());
+}
+
+TEST_CASE("instala, fixa, libera e remove o figlet", "[integration][transaction]")
+{
+    REQUIRE_BREW();
+    // Muda o sistema: só com OCTOBREW_TEST_TRANSACTIONS=1 (o CI, num runner descartável).
+    const char *allow = std::getenv("OCTOBREW_TEST_TRANSACTIONS");
+    if (!allow || std::string(allow) != "1")
+        SKIP("OCTOBREW_TEST_TRANSACTIONS=1 não definido: a transação muda o sistema");
+    for (const auto &p : mgr().listInstalled())
+        if (p.key() == "f:figlet")
+            SKIP("o figlet já está instalado; o teste não mexe no que é do usuário");
+
+    octo::Package figlet;
+    figlet.name = figlet.fullName = "figlet";
+    std::string out;
+    const octo::OutputFn collect = [&out](const std::string &c) { out += c; };
+    mgr().install({figlet}, collect);
+    const auto find = [](const std::string &key) {
+        for (const auto &p : mgr().listInstalled())
+            if (p.key() == key)
+                return p;
+        throw std::runtime_error("não instalado: " + key);
+    };
+    octo::Package p = find("f:figlet");
+    CHECK_FALSE(p.automatic);
+    mgr().pin(p, true, collect);
+    CHECK(find("f:figlet").status == octo::Status::Pinned);
+    mgr().pin(p, false, collect);
+    CHECK(find("f:figlet").status == octo::Status::Installed);
+    mgr().uninstall({p}, collect);
+    bool still = false;
+    for (const auto &q : mgr().listInstalled())
+        still = still || q.key() == "f:figlet";
+    CHECK_FALSE(still);
 }

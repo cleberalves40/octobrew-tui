@@ -32,8 +32,9 @@ jobs:
     - name: Install Dependencies
       run: brew install cmake ninja ftxui catch2
 
+    # O runner é descartável: a integração também instala e remove o figlet.
     - name: Build, test and run against Homebrew
-      run: sh tests/macos-e2e.sh build
+      run: sh tests/macos-e2e.sh --transactions build
 
   # Linux: compila contra o FTXUI 6.1.9 (a versão mais antiga suportada) e roda
   # os testes que não precisam do Homebrew, também com AddressSanitizer e UBSan.

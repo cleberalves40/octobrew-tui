@@ -18,7 +18,7 @@ FreeBSD: as mesmas abas, os mesmos atalhos, os mesmos temas e ícones
  U curl                         Formula  8.9.1              4.72 MiB  2026-10-19 09:12
  P wget                         Formula  1.24.5             4.01 MiB  2026-09-02 15:40
 ────────────────────────────────────────────────────────────────────────────────────
- 1 i Info   2 f Files   4 > Output   6 ? Help
+ 1 i Info   2 f Files   3 a Actions   4 > Output   6 ? Help
 curl  Get a file from an HTTP, HTTPS or FTP server
 Status:             Outdated (version 8.10.0 is available)
 Type:               Formula
@@ -27,16 +27,21 @@ Version:            8.10.0
 Tap:                homebrew/core
 ────────────────────────────────────────────────────────────────────────────────────
 Ready.                                   Theme: System  4 package(s)  2 outdated
-F1Help  F5Refresh  F6Sort  F8Tap  F9Menu  F10Exit  iInstalled/Repository
+F1Help  F5Refresh  F6Sort  F8Tap  F9Menu  F10Exit  +/-Mark  M-mApply
 ```
 
 (com `--icons=ascii`: **I** instalado, **d** dependência, **U** desatualizado, **N** mais
-novo que o repositório, **P** fixado com `brew pin`, **-** não instalado.)
+novo que o repositório, **P** fixado com `brew pin`, **-** não instalado; **+** marcado
+para instalar e **x** para remover.)
 
 ## Estado
 
-**v0.1.0 — somente leitura** (a Fase 1 do [roadmap](docs/ROADMAP.md)). O programa:
+**v0.2.0** (as Fases 1 e 2 do [roadmap](docs/ROADMAP.md)). O programa:
 
+- marca pacotes para instalar (**+**) e remover (**-**), mostra a prévia da transação e
+  a executa (**Alt+M**), com um snapshot em Brewfile antes;
+- instala as atualizações (**Ctrl+U**), atualiza o Homebrew (**Ctrl+K**), limpa o cache,
+  remove as dependências desnecessárias, fixa e libera pacotes e restaura um snapshot;
 - lista as fórmulas e os casks instalados e os do repositório;
 - mostra os detalhes do pacote selecionado, incluindo os *caveats*;
 - mostra os arquivos de cada instalado e o espaço que ele ocupa em disco;
@@ -44,7 +49,7 @@ novo que o repositório, **P** fixado com `brew pin`, **-** não instalado.)
 - ordena por qualquer coluna (**F6**) e maximiza a lista ou as abas (**F11**);
 - tem os 15 temas e as Preferências do octopkg-tui.
 
-Instalar, remover, atualizar e fixar pacotes é a Fase 2. Veja o [CHANGELOG](CHANGELOG.md).
+A aba Notícias é a Fase 3. Veja o [CHANGELOG](CHANGELOG.md).
 
 ## Requisitos
 
@@ -93,6 +98,35 @@ não tem. Fórmula e cask de mesmo nome (`docker`) são duas linhas.
 
 O Homebrew não roda como root, e o octobrew-tui também não.
 
+## Transações
+
+| Ação | Prévia (não muda nada) | Operação |
+|:---|:---|:---|
+| Alt+M: instalar os marcados com + | `brew install --dry-run --formula …` / `--cask …` | `brew install --no-ask --formula …` / `--cask …` |
+| Alt+M: remover os marcados com − | os dependentes, dos recibos do brew já lidos | `brew uninstall --cask …`, depois `--formula …` |
+| Ctrl+U: instalar as atualizações | `brew upgrade --dry-run` | `brew upgrade --no-ask` |
+| Ctrl+K: atualizar o Homebrew | — | `brew update` |
+| Limpar o cache local | `brew cleanup --dry-run --prune=all` | `brew cleanup --prune=all` |
+| Remover dependências desnecessárias | `brew autoremove --dry-run` | `brew autoremove` |
+| Fixar / Liberar | — | `brew pin` / `brew unpin` |
+| Restaurar um snapshot | — | `brew bundle install --file=… --no-upgrade` |
+
+- **Dependentes:** o brew não remove o que outros instalados usam. Os que dependem dos
+  marcados, direta ou indiretamente, vão juntos, como no `pkg remove -R` do OctoPkg, e o
+  diálogo vira **Aviso**, com o foco em Cancelar. Um dependente fixado impede a remoção.
+- **Snapshot:** antes da transação, o diálogo oferece um `brew bundle dump` em
+  `~/.config/octobrew-tui/snapshots/AAMMDD-hhmmss.Brewfile`, o Boot Environment do
+  OctoPkg no Homebrew. Vem marcado ao instalar e atualizar e desmarcado ao remover. Se o
+  snapshot falhar, nada muda.
+- **Sem surpresas:** as operações rodam sem auto-update, sem a pergunta do brew 7 e sem o
+  autoremove automático do `uninstall` (que levaria pacotes fora da prévia: ele é a ação
+  própria do menu Arquivo).
+- **sudo:** casks com instaladores `.pkg` ou passos de sistema pedem o sudo; o diálogo os
+  avisa. Se o sudo não tiver a senha em cache, a tela é suspensa enquanto ele a pede no
+  terminal; no resto, a operação roda em segundo plano, com a saída ao vivo na aba Saída.
+- O `ftxui`, de que o octobrew-tui depende, e o próprio `octobrew-tui` não podem ser
+  removidos, como o `pkg` no OctoPkg.
+
 ## Teclado e mouse
 
 As teclas são as do octopkg-tui. No teclado do Mac, as teclas F podem pedir o **fn**,
@@ -106,17 +140,22 @@ então cada uma tem uma alternativa:
 | <kbd>F7</kbd> / <kbd>Alt+D</kbd> | Buscar por nome ou por descrição |
 | <kbd>F8</kbd> / <kbd>t</kbd> | Filtrar por tap (homebrew/core, homebrew/cask, taps de terceiros); uma letra salta na lista |
 | <kbd>i</kbd> / <kbd>Alt+I</kbd> | Alternar entre os instalados e o repositório |
+| <kbd>+</kbd> / <kbd>Insert</kbd> | Marcar o pacote para instalar (de novo: desmarca) |
+| <kbd>-</kbd> / <kbd>Delete</kbd> | Marcar o pacote para remover |
+| <kbd>Alt+M</kbd> | Aplicar: prévia, confirmação e a transação |
+| <kbd>Ctrl+E</kbd> | Desfazer as marcas |
+| <kbd>Ctrl+U</kbd> / <kbd>Ctrl+K</kbd> | Instalar as atualizações / atualizar o Homebrew |
 | <kbd>F6</kbd> / <kbd>s</kbd> | Escolher a coluna de ordenação (de novo na mesma coluna inverte) |
 | Clique no cabeçalho | Ordenar: crescente, decrescente, ordem do brew |
-| <kbd>1</kbd> <kbd>2</kbd> <kbd>4</kbd> <kbd>6</kbd> / <kbd>Alt+1</kbd>… | Abas Informação, Arquivos, Saída e Ajuda, com os números do OctoPkg |
+| <kbd>1</kbd>…<kbd>4</kbd> <kbd>6</kbd> / <kbd>Alt+1</kbd>… | Abas Informação, Arquivos, Ações, Saída e Ajuda, com os números do OctoPkg |
 | <kbd>F1</kbd> / <kbd>?</kbd> | Ajuda |
 | <kbd>Enter</kbd> | Aba Informação do pacote selecionado |
 | <kbd>Tab</kbd> | Rolar a aba com as setas (de novo, ou <kbd>Esc</kbd>, volta à lista) |
 | <kbd>Ctrl+F</kbd> | Buscar texto nas abas Arquivos, Saída e Ajuda (<kbd>F3</kbd> / <kbd>Shift+F3</kbd>) |
-| <kbd>F9</kbd> / <kbd>Alt+A</kbd> <kbd>Alt+B</kbd> <kbd>Alt+J</kbd> | Menus Arquivo, Busca e Ajuda |
+| <kbd>F9</kbd> / <kbd>Alt+A</kbd> <kbd>Alt+B</kbd> <kbd>Alt+C</kbd> <kbd>Alt+J</kbd> | Menus Arquivo, Busca, Ações e Ajuda |
 | <kbd>Alt+,</kbd> / <kbd>Alt+T</kbd> | Preferências (tema, idioma, ícones) / próximo tema |
 | <kbd>F11</kbd> / <kbd>Alt+Z</kbd> | Maximizar a lista, depois as abas, depois voltar às duas |
-| <kbd>Ctrl+Q</kbd> / <kbd>F10</kbd> / <kbd>q</kbd> | Sair |
+| <kbd>Ctrl+Q</kbd> / <kbd>F10</kbd> / <kbd>q</kbd> | Sair (não durante uma operação) |
 
 No Terminal do macOS, ative **"Usar Option como tecla Meta"** para os atalhos com Alt (no
 iTerm2: *Left Option key: Esc+*). O mapa completo está em [docs/KEYMAP.md](docs/KEYMAP.md).
@@ -125,7 +164,7 @@ iTerm2: *Left Option key: Esc+*). O mapa completo está em [docs/KEYMAP.md](docs
 
 | Camada | Local | Responsabilidade |
 |:---|:---|:---|
-| Núcleo | `src/core/` | `brew.*`: o brew sem shell, a leitura do JSON dele e do cache da API, estados, dependentes e tamanhos em disco. `json.*`: um leitor de JSON próprio. `process`, `i18n` e `settings` vêm do octopkg-tui sem mudança. C++17 puro, sem dependências. |
+| Núcleo | `src/core/` | `brew.*`: o brew sem shell, a leitura do JSON dele, do cache da API e das prévias (`--dry-run`), estados, dependentes, as operações e os snapshots, e os tamanhos em disco. `json.*`: um leitor de JSON próprio. `process`, `i18n` e `settings` vêm do octopkg-tui sem mudança. C++17 puro, sem dependências. |
 | Modelo | `src/model/` | Filtro, ordenação (versão, tipo, tamanho, data, estado), filtro por tap e a seleção que acompanha o pacote (pela chave `f:nome` / `c:token`) |
 | Interface | `src/tui/` | FTXUI: tela, temas, teclado, mouse, diálogos, menus e busca nas abas, do octopkg-tui; listagem, detalhes e tamanhos em segundo plano |
 
@@ -133,7 +172,8 @@ iTerm2: *Left Option key: Esc+*). O mapa completo está em [docs/KEYMAP.md](docs
 
 ```sh
 cmake -B build -S . -DOCTOBREW_TUI_BUILD_TESTS=ON && cmake --build build && ctest --test-dir build
-sh tests/macos-e2e.sh build    # tudo, mais a integração com o Homebrew real (só leitura)
+sh tests/macos-e2e.sh build    # tudo, mais a integração com o Homebrew real (consultas e prévias)
+sh tests/macos-e2e.sh --transactions build   # e instala, fixa e remove o figlet (o CI faz isso)
 sh tests/tui-smoke.sh build    # a interface num pseudo-terminal, com um brew falso
 ```
 
@@ -144,7 +184,9 @@ sh tests/tui-smoke.sh build    # a interface num pseudo-terminal, com um brew fa
 - `test_view`: desenha a tela em texto e dirige a interface com eventos de teclado,
   inclusive o caminho completo (listagem, repositório, detalhes e tamanhos) com o brew
   falso.
-- `test_integration`: contra o Homebrew real, só lendo.
+- `test_integration`: contra o Homebrew real: as consultas e as prévias, sem mudar nada;
+  com `OCTOBREW_TEST_TRANSACTIONS=1`, instala, fixa e remove o figlet (se ele não estiver
+  instalado).
 - `tests/tui-smoke.sh`: a interface num pseudo-terminal com um brew falso; roda também no
   Ubuntu.
 

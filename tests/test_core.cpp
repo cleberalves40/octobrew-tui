@@ -10,11 +10,13 @@
 #include "settings.h"
 #include "support.h"
 
+#include <algorithm>
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers.hpp>   // CHECK_THROWS_WITH
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include <cstdlib>
+#include <ctime>
 #include <stdexcept>
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -551,4 +553,211 @@ TEST_CASE("preferências gravam e releem", "[settings]")
     CHECK(s.intValue("sort.column", -1) == 4);
     CHECK(s.value("icons") == "ascii");
     CHECK(s.intValue("icons", 7) == 7);
+}
+
+// ---------------------------------------------------------------------------
+// v0.2.0: transações
+// ---------------------------------------------------------------------------
+
+TEST_CASE("lê a prévia do brew install --dry-run", "[parse][transaction]")
+{
+    const auto p = octo::parseDryRun(kInstallDryRun);
+    REQUIRE(p.sections.size() == 2);
+    CHECK(p.sections[0].title == "Would install 2 formulae");
+    CHECK(p.sections[0].verb == "install");
+    // Sem o alinhamento do brew, e sem as linhas de download.
+    CHECK(p.sections[0].items == std::vector<std::string>{"figlet 2.2.5", "wget2 2.3.0"});
+    CHECK(p.sections[1].title == "Would install 2 dependencies for wget2");
+    CHECK(p.count() == 4);
+    CHECK(p.items("install").size() == 4);
+    CHECK(octo::parseDryRun(kInstallCaskDryRun).items() == std::vector<std::string>{"kitty"});
+}
+
+TEST_CASE("lê a prévia do upgrade, do autoremove e do cleanup", "[parse][transaction]")
+{
+    const auto up = octo::parseDryRun(kUpgradeDryRun, kUpgradeDryRunErr);
+    CHECK(up.items("upgrade") == std::vector<std::string>{"curl 8.9.1 -> 8.10.0", "docker 4.38.0 -> 4.40.0"});
+    REQUIRE(up.warnings.size() == 1);
+    CHECK(up.warnings[0].rfind("Not upgrading alacritty", 0) == 0);
+    CHECK(octo::itemName(up.items()[1]) == "docker");
+
+    CHECK(octo::parseDryRun(kAutoremoveDryRun).items("autoremove") == std::vector<std::string>{"libgpg-error", "lzlib"});
+
+    const auto clean = octo::parseDryRun(kCleanupDryRun);
+    CHECK(clean.count() == 2);
+    CHECK(clean.items("remove")[0] == "/opt/homebrew/Cellar/curl/8.9.0 (558 files, 4.7MB)");
+    CHECK(clean.freed == "6.2MB");
+
+    // Nada a fazer: nenhuma seção.
+    CHECK(octo::parseDryRun("").count() == 0);
+    CHECK(octo::parseDryRun("==> Would install 0 formulae:\n==> Downloading x\n").sections.empty());
+}
+
+TEST_CASE("remover leva junto quem depende, como o pkg remove -R", "[transaction]")
+{
+    const auto installed = octo::parseInstalled(kInstalledJson);
+    // brotli: curl e wget dependem dele, e o cask docker também.
+    auto deps = octo::dependentsClosure(installed, {"f:brotli"});
+    std::sort(deps.begin(), deps.end());
+    CHECK(deps == std::vector<std::string>{"c:docker", "f:curl", "f:wget"});
+    // Marcados juntos não entram de novo; quem não é usado não leva nada.
+    CHECK(octo::dependentsClosure(installed, {"f:brotli", "f:curl", "f:wget", "c:docker"}).empty());
+    CHECK(octo::dependentsClosure(installed, {"f:curl"}).empty());
+    CHECK(octo::dependentsClosure(installed, {"c:alacritty"}).empty());
+
+    // Indiretos: a → b → c; remover c leva b e a.
+    std::vector<octo::Package> chain(3);
+    chain[0].name = chain[0].fullName = "a";
+    chain[0].dependencies = {"b"};
+    chain[1].name = chain[1].fullName = "b";
+    chain[1].dependencies = {"c"};
+    chain[2].name = chain[2].fullName = "c";
+    auto all = octo::dependentsClosure(chain, {"f:c"});
+    std::sort(all.begin(), all.end());
+    CHECK(all == std::vector<std::string>{"f:a", "f:b"});
+}
+
+TEST_CASE("o FTXUI e o próprio programa não podem ser removidos", "[transaction]")
+{
+    octo::Package p;
+    p.name = "ftxui";
+    CHECK(octo::isForbidden(p));
+    p.name = "octobrew-tui";
+    CHECK(octo::isForbidden(p));
+    p.kind = Kind::Cask;   // um cask de mesmo nome não é o FTXUI
+    CHECK_FALSE(octo::isForbidden(p));
+    p.kind = Kind::Formula;
+    p.name = "curl";
+    CHECK_FALSE(octo::isForbidden(p));
+}
+
+TEST_CASE("casks que pedem o sudo: .pkg e passos de sistema na desinstalação", "[transaction]")
+{
+    CHECK(octo::caskNeedsSudo(kPkgCaskInfo, "zoom"));
+    CHECK_FALSE(octo::caskNeedsSudo(kPkgCaskInfo, "kitty"));   // o launchctl é do zap, que não roda
+    CHECK_FALSE(octo::caskNeedsSudo(kPkgCaskInfo, "outro"));
+    CHECK_FALSE(octo::caskNeedsSudo(kInstalledJson, "alacritty"));
+}
+
+TEST_CASE("snapshots: nome e lista, do mais novo ao mais antigo", "[transaction]")
+{
+    std::tm tm {};
+    tm.tm_year = 126;
+    tm.tm_mon = 9;
+    tm.tm_mday = 25;
+    tm.tm_hour = 14;
+    tm.tm_min = 3;
+    tm.tm_sec = 9;
+    tm.tm_isdst = -1;
+    CHECK(octo::snapshotName(std::mktime(&tm)) == "261025-140309.Brewfile");
+
+    TempDir dir;
+    for (const char *n : {"261024-100000.Brewfile", "261025-090000.Brewfile", "notas.txt", "260101-000000.Brewfile"})
+        writeFile(dir.file(n), "");
+    CHECK(octo::listSnapshots(dir.path)
+          == std::vector<std::string>{"261025-090000.Brewfile", "261024-100000.Brewfile", "260101-000000.Brewfile"});
+    CHECK(octo::listSnapshots(dir.file("nao-existe")).empty());
+}
+
+TEST_CASE("prévias pelo brew, sem mudar nada", "[brew][transaction]")
+{
+    FakeBrew brew;
+    brew.preview("install", kInstallDryRun);
+    octo::Manager m(brew.path);
+    const auto p = m.previewInstall({package("figlet", Kind::Formula, false), package("kitty", Kind::Cask, false),
+                                     package("wget2", Kind::Formula, false)});
+    CHECK(p.count() == 8);   // o brew falso dá a mesma prévia às duas chamadas, e elas se somam
+    // Fórmulas e casks em chamadas separadas: o brew não aceita os dois juntos.
+    CHECK(brew.calls() == std::vector<std::string>{"install|--dry-run|--formula|figlet|wget2",
+                                                   "install|--dry-run|--cask|kitty"});
+    // Sem auto-update, sem a pergunta do brew 7 e sem o autoremove automático.
+    const auto env = readLines(brew.log + ".env");
+    CHECK(env[0].rfind("1|1|", 0) == 0);
+    CHECK(contains(env[0], "|1|1|/usr/bin/false"));
+
+    m.previewUpgrade();
+    m.previewAutoremove();
+    m.previewCleanup();
+    const auto calls = brew.calls();
+    CHECK(std::vector<std::string>(calls.end() - 3, calls.end())
+          == std::vector<std::string>{"upgrade|--dry-run", "autoremove|--dry-run", "cleanup|--dry-run|--prune=all"});
+    CHECK(brew.operations().empty());
+}
+
+TEST_CASE("prévia que falha mostra o erro do brew, sem os avisos", "[brew][transaction]")
+{
+    FakeBrew brew;
+    brew.failNext("install-dry");
+    CHECK_THROWS_WITH(octo::Manager(brew.path).previewInstall({package("figlet", Kind::Formula, false)}),
+                      "install-dry falhou");
+    CHECK_THROWS_WITH(octo::Manager(brew.path).previewInstall({}), ContainsSubstring("No packages selected"));
+}
+
+TEST_CASE("operações chamam o brew com os comandos certos", "[brew][transaction]")
+{
+    FakeBrew brew;
+    octo::Manager m(brew.path);
+    std::string out;
+    const octo::OutputFn collect = [&out](const std::string &c) { out += c; };
+    const std::vector<octo::Package> both{package("curl", Kind::Formula, true), package("alacritty", Kind::Cask, true)};
+
+    m.install(both, collect);
+    m.uninstall(both, collect);
+    m.upgrade(collect);
+    m.update(collect);
+    m.cleanup(collect);
+    m.autoremove(collect);
+    m.pin(package("curl", Kind::Formula, true), true, collect);
+    m.pin(package("alacritty", Kind::Cask, true), false, collect);
+    m.snapshot(brew.dir.file("snaps/x.Brewfile"), collect);
+    m.restore(brew.dir.file("snaps/x.Brewfile"), collect);
+    CHECK(brew.operations() == std::vector<std::string>{
+                                   "install|--no-ask|--formula|curl",
+                                   "install|--no-ask|--cask|alacritty",
+                                   // Os casks primeiro: podem depender de uma fórmula que também sai.
+                                   "uninstall|--cask|alacritty",
+                                   "uninstall|--formula|curl",
+                                   "upgrade|--no-ask",
+                                   "update",
+                                   "cleanup|--prune=all",
+                                   "autoremove",
+                                   "pin|--formula|curl",
+                                   "unpin|--cask|alacritty",
+                                   "bundle|dump|--file=" + brew.dir.file("snaps/x.Brewfile") + "|--force",
+                                   "bundle|install|--file=" + brew.dir.file("snaps/x.Brewfile") + "|--no-upgrade",
+                               });
+    // A saída chega por collect; o diretório do snapshot foi criado.
+    CHECK(contains(out, "executando install"));
+    CHECK(readFile(brew.dir.file("snaps/x.Brewfile")) == "brew \"curl\"\n");
+    // Com o terminal (interactive), o sudo pode pedir a senha: sem o SUDO_ASKPASS.
+    m.install({package("zoom", Kind::Cask, false)}, collect, true);
+    CHECK(readLines(brew.log + ".env").back().back() == '|');
+    CHECK(m.commandLine(octo::Manager::installArgs(both)[0]) == "brew install --formula curl");
+}
+
+TEST_CASE("operações recusam o que não pode e repassam os erros do brew", "[brew][transaction]")
+{
+    FakeBrew brew;
+    octo::Manager m(brew.path);
+    CHECK_THROWS_WITH(m.uninstall({package("ftxui", Kind::Formula, true)}), "ftxui cannot be removed.");
+    CHECK_THROWS_WITH(m.install({package("-x", Kind::Formula, false)}), ContainsSubstring("Invalid package name"));
+    CHECK_THROWS_WITH(m.restore(brew.dir.file("nao-existe.Brewfile")), ContainsSubstring("Could not read"));
+    CHECK(brew.operations().empty());
+
+    brew.failNext("uninstall");
+    CHECK_THROWS_WITH(m.uninstall({package("curl", Kind::Formula, true)}), "uninstall falhou");
+    // O sudo sem senha (SUDO_ASKPASS=/usr/bin/false) vira uma dica.
+    TempDir dir;
+    const std::string sudo = fakeBrew(dir, dir.file("log"), "echo 'sudo: no password was provided' >&2; exit 1");
+    CHECK_THROWS_WITH(octo::Manager(sudo).install({package("zoom", Kind::Cask, false)}), ContainsSubstring("sudo -v"));
+}
+
+TEST_CASE("casks que pedem o sudo, pelo brew info", "[brew][transaction]")
+{
+    FakeBrew brew;
+    writeFile(brew.dir.file("zoom.json"), kPkgCaskInfo);
+    octo::Manager m(brew.path);
+    CHECK(m.casksNeedingSudo({"zoom"}) == std::vector<std::string>{"zoom"});
+    CHECK(m.casksNeedingSudo({}).empty());
+    CHECK(brew.calls() == std::vector<std::string>{"info|--json=v2|--cask|zoom"});
 }

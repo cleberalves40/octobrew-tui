@@ -5,10 +5,17 @@
 # API e os tamanhos) e a interface num pseudo-terminal. Espera os pacotes de
 # compilação instalados pelo brew (cmake, ninja, ftxui, catch2).
 #
-# uso: tests/macos-e2e.sh [diretório-de-build]
+# Com --transactions, a integração também instala, fixa e remove o figlet
+# (o CI faz isso num runner descartável).
+#
+# uso: tests/macos-e2e.sh [--transactions] [diretório-de-build]
 
 set -eu
 
+if [ "${1:-}" = --transactions ]; then
+	export OCTOBREW_TEST_TRANSACTIONS=1
+	shift
+fi
 build=${1:-build}
 brew=$(command -v brew || true)
 [ -n "$brew" ] || { echo "FAIL: brew não encontrado no PATH" >&2; exit 1; }
