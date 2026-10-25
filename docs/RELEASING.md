@@ -71,6 +71,10 @@ cd homebrew-tap && git checkout -b octobrew-tui-X.Y.Z && git commit -am "octobre
 gh pr create --fill   # o CI do tap roda o audit, instala e testa
 ```
 
+O CI do tap (`.github/workflows/tests.yml`) roda o `brew style`, o `brew audit`, a
+instalação a partir do código e o `brew test` no macOS e no Linux, a cada mudança e toda
+segunda-feira.
+
 Os usuários instalam e atualizam com:
 
 ```sh
