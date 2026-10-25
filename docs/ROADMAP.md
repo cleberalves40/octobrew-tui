@@ -59,11 +59,14 @@ núcleo que fala com o gerenciador de pacotes foi reescrito: `core/brew` no luga
 - Aba Notícias (5) com o feed do blog do Homebrew, cache em disco e Ctrl+G.
 - O feed é Atom (não RSS, como o dos BSDs): o octobrew-tui lê os dois.
 
-### Fase 4 — Funções que só o Homebrew tem (v0.4.0)
-- Aba Serviços: `brew services list --json`, com iniciar, parar e reiniciar.
-- Gerenciar taps (`brew tap` / `untap`).
-- Visão "Leaves" (`brew leaves`) e o `brew doctor` na aba Saída.
-- Importar e exportar Brewfile.
+### Fase 4 — Funções que só o Homebrew tem ✅ (v0.4.0)
+- Aba Serviços (7): `brew services list --json`, com iniciar, parar e reiniciar no
+  menu Homebrew (Alt+H).
+- Taps: `brew tap` (com `brew trust --tap`, que o brew 6+ exige dos taps de terceiros)
+  e `brew untap`; os pacotes dos taps de terceiros na visão Repositório.
+- Folhas (`l`), como o `brew leaves`, e o `brew doctor`, com os avisos na aba Saída.
+- Exportar um Brewfile (`brew bundle dump`) e instalar de um (`brew bundle check` como
+  prévia, `brew bundle install --no-upgrade`).
 
 ### Fase 5 — Distribuição (v1.0.0)
 - Tap próprio (`cleberalves40/homebrew-tap`), validado no CI com

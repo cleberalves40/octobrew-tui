@@ -18,7 +18,7 @@ FreeBSD: as mesmas abas, os mesmos atalhos, os mesmos temas e ícones
  U curl                         Formula  8.9.1              4.72 MiB  2026-10-19 09:12
  P wget                         Formula  1.24.5             4.01 MiB  2026-09-02 15:40
 ────────────────────────────────────────────────────────────────────────────────────
- 1 i Info   2 f Files   3 a Actions   4 > Output   5 n News   6 ? Help
+ 1 Info  2 Files  3 Actions  4 Output  5 News  6 Help  7 Services
 curl  Get a file from an HTTP, HTTPS or FTP server
 Status:             Outdated (version 8.10.0 is available)
 Type:               Formula
@@ -36,8 +36,8 @@ para instalar e **x** para remover.)
 
 ## Estado
 
-**v0.3.0** (as Fases 1, 2 e 3 do [roadmap](docs/ROADMAP.md)): todas as abas do OctoPkg.
-O programa:
+**v0.4.0** (as Fases 1 a 4 do [roadmap](docs/ROADMAP.md)): todas as abas do OctoPkg e o
+que só o Homebrew tem. O programa:
 
 - marca pacotes para instalar (**+**) e remover (**-**), mostra a prévia da transação e
   a executa (**Alt+M**), com um snapshot em Brewfile antes;
@@ -49,10 +49,12 @@ O programa:
 - busca por nome ou por descrição (**F7**) e filtra por tap (**F8**);
 - ordena por qualquer coluna (**F6**) e maximiza a lista ou as abas (**F11**);
 - tem os 15 temas e as Preferências do octopkg-tui;
-- mostra as notícias do blog do Homebrew (aba **5**, **Ctrl+G**).
+- mostra as notícias do blog do Homebrew (aba **5**, **Ctrl+G**);
+- mostra os serviços (aba **7**) e os inicia, para e reinicia; adiciona e remove taps,
+  com a confiança do brew 6+; filtra as folhas (**l**, como o `brew leaves`); roda o
+  `brew doctor`; e exporta e instala de Brewfiles, tudo no menu **Homebrew** (**Alt+H**).
 
-A próxima fase traz o que só o Homebrew tem: serviços, taps e Brewfiles. Veja o
-[CHANGELOG](CHANGELOG.md).
+A próxima fase é a distribuição (o tap próprio e a v1.0.0). Veja o [CHANGELOG](CHANGELOG.md).
 
 ## Requisitos
 
@@ -87,6 +89,8 @@ o modo de busca, o tema, o idioma e os ícones (pelo diálogo de Preferências, 
 | Instalados (fórmulas e casks, com desatualizados, pins e dependências) | `brew info --json=v2 --installed`, uma chamada | ~2 s (o Ruby do brew) |
 | Repositório (~16 mil fórmulas e casks) | o cache da API do Homebrew, lido direto (`$(brew --cache)/api/internal/packages.*.jws.json`; no brew 4, `formula.jws.json` e `cask.jws.json`), sem rede e sem Ruby | ~0,3 s |
 | Notícias (aba 5) | `https://brew.sh/atom.xml`, com o `/usr/bin/curl` (só https, certificado conferido), em cache em `~/.config/octobrew-tui/news.xml` | na primeira visita e no Ctrl+G, em segundo plano |
+| Pacotes dos taps de terceiros (visão Repositório) | `brew tap-info --json --installed`: o nome e o tap | ~1,5 s, junto da lista do repositório |
+| Serviços (aba 7) | `brew services list --json` | ~2 s, na primeira visita, no F5 e depois de cada ação |
 | Detalhes do selecionado | `brew info --json=v2 --formula\|--cask NOME` | ~0,5–1 s, em segundo plano e em cache |
 | Arquivos (aba 2) | `brew list --formula --verbose` / `brew list --cask` | idem |
 | Tamanho em disco | o Cellar (todas as versões) e o Caskroom, mais o aplicativo em `/Applications`, medidos pelo próprio programa | segundo plano, depois da lista |
@@ -114,6 +118,11 @@ O Homebrew não roda como root, e o octobrew-tui também não.
 | Remover dependências desnecessárias | `brew autoremove --dry-run` | `brew autoremove` |
 | Fixar / Liberar | — | `brew pin` / `brew unpin` |
 | Restaurar um snapshot | — | `brew bundle install --file=… --no-upgrade` |
+| Instalar de um Brewfile | `brew bundle check --verbose` (o que falta) | `brew bundle install --file=… --no-upgrade` |
+| Exportar um Brewfile | — | `brew bundle dump --file=… --force` (pergunta antes de trocar) |
+| Iniciar / parar / reiniciar o serviço | — | `brew services start\|stop\|restart nome` |
+| Adicionar / remover um tap | — | `brew tap user/repo` (e `brew trust --tap`) / `brew untap` |
+| Verificar o sistema | `brew doctor` (só lê) | — |
 
 - **Dependentes:** o brew não remove o que outros instalados usam. Os que dependem dos
   marcados, direta ou indiretamente, vão juntos, como no `pkg remove -R` do OctoPkg, e o
@@ -152,12 +161,14 @@ então cada uma tem uma alternativa:
 | <kbd>F6</kbd> / <kbd>s</kbd> | Escolher a coluna de ordenação (de novo na mesma coluna inverte) |
 | Clique no cabeçalho | Ordenar: crescente, decrescente, ordem do brew |
 | <kbd>1</kbd>…<kbd>6</kbd> / <kbd>Alt+1</kbd>…<kbd>Alt+6</kbd> | Abas Informação, Arquivos, Ações, Saída, Notícias e Ajuda, com os números do OctoPkg |
+| <kbd>7</kbd> / <kbd>Alt+7</kbd> | Aba Serviços (`brew services`) |
+| <kbd>l</kbd> | Só as folhas: fórmulas instaladas de que nada mais depende (`brew leaves`) |
 | <kbd>Ctrl+G</kbd> | Buscar as últimas notícias do Homebrew (aba Notícias) |
 | <kbd>F1</kbd> / <kbd>?</kbd> | Ajuda |
 | <kbd>Enter</kbd> | Aba Informação do pacote selecionado |
 | <kbd>Tab</kbd> | Rolar a aba com as setas (de novo, ou <kbd>Esc</kbd>, volta à lista) |
 | <kbd>Ctrl+F</kbd> | Buscar texto nas abas Arquivos, Saída, Notícias e Ajuda (<kbd>F3</kbd> / <kbd>Shift+F3</kbd>) |
-| <kbd>F9</kbd> / <kbd>Alt+A</kbd> <kbd>Alt+B</kbd> <kbd>Alt+C</kbd> <kbd>Alt+J</kbd> | Menus Arquivo, Busca, Ações e Ajuda |
+| <kbd>F9</kbd> / <kbd>Alt+A</kbd> <kbd>Alt+B</kbd> <kbd>Alt+C</kbd> <kbd>Alt+H</kbd> <kbd>Alt+J</kbd> | Menus Arquivo, Busca, Ações, Homebrew e Ajuda |
 | <kbd>Alt+,</kbd> / <kbd>Alt+T</kbd> | Preferências (tema, idioma, ícones) / próximo tema |
 | <kbd>F11</kbd> / <kbd>Alt+Z</kbd> | Maximizar a lista, depois as abas, depois voltar às duas |
 | <kbd>Ctrl+Q</kbd> / <kbd>F10</kbd> / <kbd>q</kbd> | Sair (não durante uma operação) |

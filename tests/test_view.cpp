@@ -550,7 +550,7 @@ TEST_CASE("menus Arquivo, Busca e Ajuda, e o Sobre", "[app][menu]")
     CHECK(f.app->viewState().remoteView);
 
     f.app->handleEvent(Event::Special("\x1b" "j"));   // Alt+J: Ajuda
-    REQUIRE(f.app->dialog().menu == 3);               // Arquivo, Busca, Ações, Ajuda
+    REQUIRE(f.app->dialog().menu == 4);               // Arquivo, Busca, Ações, Homebrew, Ajuda
     f.app->handleEvent(Event::ArrowDown);
     f.app->handleEvent(Event::Return);
     REQUIRE(f.app->dialog().kind == tui::Dialog::Message);
@@ -1226,4 +1226,244 @@ TEST_CASE("aba Notícias sem rede mostra o aviso; o menu Arquivo busca de novo",
     CHECK(s.tab == tui::NewsTab);   // o menu leva à aba
     CHECK(s.news.size() == 2);
     CHECK(s.newsError.empty());
+}
+
+// --- v0.4.0: serviços, folhas, taps, doctor e Brewfiles ---
+
+namespace {
+
+// Abre o menu Homebrew (Alt+H) e escolhe o item downs setas abaixo.
+// Serviços, Iniciar, Parar, Reiniciar, (sep), Adicionar tap, Remover tap,
+// (sep), Exportar Brewfile, Instalar de Brewfile, (sep), brew doctor.
+void brewMenu(BrewFixture &f, int downs)
+{
+    f.app->handleEvent(Event::Special("\x1b" "h"));
+    REQUIRE(f.dialog().kind == tui::Dialog::Menu);
+    REQUIRE(f.dialog().menu == 3);
+    for (int i = 0; i < downs; ++i)
+        f.app->handleEvent(Event::ArrowDown);
+    f.app->handleEvent(Event::Return);
+}
+
+void type(BrewFixture &f, const std::string &text, size_t erase = 0)
+{
+    for (size_t i = 0; i < erase; ++i)
+        f.app->handleEvent(Event::Backspace);
+    for (char c : text)
+        f.app->handleEvent(Event::Character(c));
+}
+
+} // namespace
+
+TEST_CASE("aba Serviços (7) e o serviço na aba Informação", "[app][services]")
+{
+    i18n::setLocale("en_US");
+    BrewFixture f;
+    writeFile(f.brew.dir.file("services.json"), kServicesJson);
+    f.app->handleEvent(Event::Character('7'));
+    tui::ViewState s = f.app->viewState();
+    CHECK(s.tab == tui::ServicesTab);
+    REQUIRE(s.services.size() == 3);
+    std::string out = f.screen();
+    for (const char *t : {"7 s Services", "foo", "Started", "cleber", "php", "Not running", "postgresql@17", "Error",
+                          "(exit code 78)", "Homebrew menu (Alt+H)"})
+        CHECK_INFO(out, t);
+    // Ctrl+F busca na aba.
+    f.app->handleEvent(Event::Special("\x06"));
+    type(f, "postgres");
+    CHECK(f.app->viewState().findCount == 1);
+    f.app->handleEvent(Event::Escape);
+
+    f.select("f:someone/tap/foo");
+    f.app->handleEvent(Event::Character('1'));
+    out = f.screen();
+    CHECK(has(out, "Service:"));
+    CHECK(has(out, "Started (cleber)"));
+}
+
+TEST_CASE("iniciar, parar e reiniciar o serviço da fórmula selecionada", "[app][services]")
+{
+    i18n::setLocale("en_US");
+    BrewFixture f;
+    f.select("f:curl");
+    brewMenu(f, 1);   // Iniciar
+    CHECK(f.app->viewState().status == "curl has no service.");
+    f.select("c:alacritty");
+    brewMenu(f, 1);
+    CHECK(f.app->viewState().status == "Select an installed formula.");
+    CHECK(f.brew.operations().empty());
+
+    f.select("f:someone/tap/foo");
+    brewMenu(f, 1);
+    brewMenu(f, 2);
+    brewMenu(f, 3);
+    CHECK(f.brew.operations() == std::vector<std::string>{"services|start|foo", "services|stop|foo", "services|restart|foo"});
+    // Depois de cada um, a lista dos serviços é relida.
+    int lists = 0;
+    for (const auto &c : f.brew.calls())
+        lists += c == "services|list|--json";
+    CHECK(lists == 3);
+}
+
+TEST_CASE("l mostra só as folhas, como o brew leaves", "[app][leaves]")
+{
+    i18n::setLocale("en_US");
+    BrewFixture f;
+    CHECK(f.app->viewState().rowCount == 6);
+    f.app->handleEvent(Event::Character('l'));
+    tui::ViewState s = f.app->viewState();
+    CHECK(s.leavesOnly);
+    CHECK(s.rowCount == 3);   // curl, wget e foo: o brotli é dependência, e os casks não contam
+    CHECK(has(f.screen(), "[# Installed packages · leaves]"));
+    CHECK(s.status == "Only leaves: installed formulae that no other installed package needs.");
+    // Pelo menu Busca, marcado.
+    f.app->handleEvent(Event::Special("\x1b" "b"));
+    CHECK(has(f.screen(), "• Only leaves (brew leaves)"));
+    f.app->handleEvent(Event::Escape);
+    f.app->handleEvent(Event::Character('l'));
+    CHECK(f.app->viewState().rowCount == 6);
+}
+
+TEST_CASE("adicionar um tap, com a confiança, e os pacotes dele no repositório", "[app][taps]")
+{
+    i18n::setLocale("en_US");
+    BrewFixture f;
+    brewMenu(f, 4);   // Adicionar um tap
+    REQUIRE(f.dialog().kind == tui::Dialog::Form);
+    CHECK(f.dialog().title == "Add a tap");
+    type(f, "not a tap");
+    f.app->handleEvent(Event::Return);
+    REQUIRE(f.dialog().kind == tui::Dialog::Message);
+    CHECK(has(f.dialog().message, "Invalid tap name: not a tap"));
+    f.app->handleEvent(Event::Return);
+    CHECK(f.brew.operations().empty());
+
+    brewMenu(f, 4);
+    type(f, " someone/tap ");
+    f.app->handleEvent(Event::Tab);               // a confiança
+    f.app->handleEvent(Event::Character(' '));
+    f.app->handleEvent(Event::Return);
+    CHECK(f.brew.operations() == std::vector<std::string>{"tap|someone/tap", "trust|--tap|someone/tap"});
+    CHECK(f.dialog().title == "Command finished OK!");
+    f.app->handleEvent(Event::Return);
+
+    writeFile(f.brew.dir.file("taps.json"), kTapsJson);
+    f.app->handleEvent(Event::Character('i'));
+    f.select("f:someone/tap/bar");
+    CHECK_FALSE(f.app->viewState().current.installed);
+    CHECK(f.app->viewState().totalPackages == 11);   // 8 da API, foo (instalado), bar e baz-app
+}
+
+TEST_CASE("remover um tap: recusa com pacotes dele instalados", "[app][taps]")
+{
+    i18n::setLocale("en_US");
+    BrewFixture f;
+    brewMenu(f, 5);   // Remover um tap, sem nenhum de terceiros
+    REQUIRE(f.dialog().kind == tui::Dialog::Message);
+    CHECK(f.dialog().message == "There are no third-party taps.");
+    f.app->handleEvent(Event::Return);
+
+    writeFile(f.brew.dir.file("taps.json"),
+              std::string(kTapsJson).insert(std::string(kTapsJson).rfind(']'),
+                                            R"(, {"name": "other/tap", "official": false, "trusted": true, "formula_names": ["other/tap/x"], "cask_tokens": []})"));
+    brewMenu(f, 5);
+    REQUIRE(f.dialog().kind == tui::Dialog::Form);
+    CHECK(f.dialog().fields[0].choices == std::vector<std::string>{"someone/tap  (3)  untrusted", "other/tap  (1)"});
+    f.app->handleEvent(Event::Return);   // someone/tap: o foo dele está instalado
+    REQUIRE(f.dialog().kind == tui::Dialog::Message);
+    CHECK(has(f.dialog().message, "These packages from someone/tap are installed; remove them first:\n  • someone/tap/foo"));
+    f.app->handleEvent(Event::Return);
+
+    brewMenu(f, 5);
+    f.app->handleEvent(Event::ArrowRight);   // other/tap
+    f.app->handleEvent(Event::Return);
+    REQUIRE(f.dialog().kind == tui::Dialog::Confirm);
+    CHECK(f.dialog().danger);
+    CHECK(f.dialog().focus == 1);            // "Não"
+    f.app->handleEvent(Event::Character('y'));
+    CHECK(f.brew.operations() == std::vector<std::string>{"untap|other/tap"});
+}
+
+TEST_CASE("brew doctor: pronto, ou os avisos com os detalhes na Saída", "[app][doctor]")
+{
+    i18n::setLocale("en_US");
+    BrewFixture f;
+    brewMenu(f, 8);   // Verificar o sistema
+    REQUIRE(f.dialog().kind == tui::Dialog::Message);
+    CHECK(f.dialog().message == "Your system is ready to brew.");
+    f.app->handleEvent(Event::Return);
+
+    writeFile(f.brew.dir.file("doctor.txt"), kDoctorOutput);
+    brewMenu(f, 8);
+    REQUIRE(f.dialog().kind == tui::Dialog::Message);
+    CHECK(has(f.dialog().message, "brew doctor found 2 warning(s):\n  • Some installed casks are deprecated or disabled."));
+    bool detail = false;
+    for (const auto &l : f.app->viewState().log)
+        detail = detail || has(l, "You should find replacements for the following casks:");
+    CHECK(detail);
+    CHECK(f.brew.operations().empty());   // o doctor só lê
+    f.app->handleEvent(Event::Return);
+
+    // Sai com 1 sem um "Warning:" reconhecível: o diálogo manda para a Saída.
+    writeFile(f.brew.dir.file("doctor.txt"), "Algo que o brew passou a imprimir.\n");
+    brewMenu(f, 8);
+    REQUIRE(f.dialog().kind == tui::Dialog::Message);
+    CHECK(f.dialog().message == "brew doctor reported problems.\nDetails in the Output tab.");
+}
+
+TEST_CASE("exportar e instalar de um Brewfile", "[app][bundle]")
+{
+    i18n::setLocale("en_US");
+    BrewFixture f;
+    const std::string file = f.brew.dir.file("meu.Brewfile");
+    brewMenu(f, 6);   // Exportar
+    REQUIRE(f.dialog().kind == tui::Dialog::Form);
+    CHECK(f.dialog().fields[0].text == "~/Brewfile");
+    type(f, file, 10);   // troca o ~/Brewfile pelo arquivo do teste
+    f.app->handleEvent(Event::Return);
+    CHECK(f.brew.operations() == std::vector<std::string>{"bundle|dump|--file=" + file + "|--force"});
+    CHECK(f.dialog().message == "Brewfile saved: " + file);
+    f.app->handleEvent(Event::Return);
+    // De novo: o arquivo existe, e o diálogo pergunta antes de trocar.
+    brewMenu(f, 6);
+    type(f, file, 10);
+    f.app->handleEvent(Event::Return);
+    REQUIRE(f.dialog().kind == tui::Dialog::Confirm);
+    CHECK(f.dialog().message == file + " already exists. Replace it?");
+    f.app->handleEvent(Event::Escape);
+    CHECK(f.brew.operations().size() == 1);
+
+    brewMenu(f, 7);   // Instalar de um Brewfile: nada falta
+    type(f, file, 10);
+    f.app->handleEvent(Event::Return);
+    REQUIRE(f.dialog().kind == tui::Dialog::Message);
+    CHECK(f.dialog().message == "Everything in " + file + " is already installed.");
+    f.app->handleEvent(Event::Return);
+
+    writeFile(f.brew.dir.file("bundle-check.txt"), kBundleCheckOutput);
+    brewMenu(f, 7);
+    type(f, file, 10);
+    f.app->handleEvent(Event::Return);
+    REQUIRE(f.dialog().kind == tui::Dialog::Confirm);
+    CHECK(has(f.dialog().message, "The following 2 packages need to be retrieved\n  • Cask iterm2\n  • Formula figlet"));
+    f.app->handleEvent(Event::Character('y'));
+    CHECK(f.brew.operations().back() == "bundle|install|--file=" + file + "|--no-upgrade");
+}
+
+TEST_CASE("num terminal de 80 colunas, as abas perdem os ícones e cabem", "[view][layout]")
+{
+    i18n::setLocale("en_US");
+    tui::ViewState s;
+    s.rows = sample();
+    s.iconMode = tui::IconMode::Ascii;
+    s.toInstall = {"f:curl", "f:wget"};
+    s.contentWidth = 71;   // 80 colunas, menos o indicador de posição
+    std::string out = draw(s, 80);
+    for (const char *t : {" 1 Info ", " 3 Actions (2) ", " 7 Services "})
+        CHECK_INFO(out, t);
+    CHECK_FALSE(has(out, "1 i Info"));
+    s.contentWidth = 111;
+    out = draw(s, 120);
+    CHECK(has(out, "1 i Info"));
+    CHECK(has(out, "7 s Services"));
 }

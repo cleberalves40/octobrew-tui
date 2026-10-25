@@ -28,6 +28,7 @@ struct IconSet {
     const char *output;
     const char *news;
     const char *help;
+    const char *services;
     const char *filter;
     const char *sortAscending;
     const char *sortDescending;

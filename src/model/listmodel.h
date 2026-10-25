@@ -40,7 +40,15 @@ SortSpec nextOnHeaderClick(SortSpec current, int column);
  * instalado, desatualizado, mais novo).
  */
 std::vector<int> visibleRows(const std::vector<octo::Package> &all, const std::string &filter, SortSpec sort,
-                             SearchMode mode = SearchMode::Name, const std::string &tap = std::string());
+                             SearchMode mode = SearchMode::Name, const std::string &tap = std::string(),
+                             bool leavesOnly = false);
+
+/**
+ * Uma "folha", como no "brew leaves": fórmula instalada de que nenhum outro
+ * instalado depende. Junto com o filtro (l), mostra o que dá para remover
+ * sem levar nada junto.
+ */
+bool isLeaf(const octo::Package &p);
 
 /**
  * O "grupo" do pacote para o filtro F8: o tap ("homebrew/core",

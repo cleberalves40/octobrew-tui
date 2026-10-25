@@ -47,6 +47,7 @@ const char kInstalledJson[] = R"json({
     {
       "name": "foo", "full_name": "someone/tap/foo", "tap": "someone/tap",
       "desc": "A formula from a third-party tap",
+      "service": {"run": ["/opt/homebrew/opt/foo/bin/food"], "keep_alive": {"always": true}},
       "versions": {"stable": "0.3"}, "revision": 0, "pinned": false, "outdated": false, "linked_keg": "0.3",
       "installed": [{"version": "0.3", "time": 1745000000, "installed_on_request": true, "runtime_dependencies": []}]
     }
@@ -197,6 +198,36 @@ const char kAtomFeed[] =
     "<content type=\"html\"><![CDATA[<p>We rotated the key.</p><p>Second paragraph.</p>]]></content></entry>"
     "</feed>";
 
+// "brew services list --json" (brew 7).
+const char kServicesJson[] = R"json([
+  {"name": "foo", "status": "started", "user": "cleber", "file": "/Users/cleber/Library/LaunchAgents/homebrew.mxcl.foo.plist", "exit_code": 0},
+  {"name": "php", "status": "none", "user": null, "file": "/opt/homebrew/opt/php/sh.brew.php.plist", "exit_code": null},
+  {"name": "postgresql@17", "status": "error", "user": "cleber", "file": "/Users/cleber/Library/LaunchAgents/homebrew.mxcl.postgresql@17.plist", "exit_code": 78}
+])json";
+
+// "brew tap-info --json --installed", reduzido.
+const char kTapsJson[] = R"json([
+  {"name": "homebrew/core", "official": true, "trusted": true, "installed": true,
+   "formula_names": ["curl", "wget"], "cask_tokens": []},
+  {"name": "someone/tap", "official": false, "trusted": false, "installed": true,
+   "formula_names": ["someone/tap/foo", "someone/tap/bar"], "cask_tokens": ["someone/tap/baz-app"]}
+])json";
+
+// "brew doctor" com avisos (brew 7.0.10): sai com 1.
+const char kDoctorOutput[] =
+    "Please note that these warnings are just used to help the Homebrew maintainers\n"
+    "with debugging if you file an issue.\n\n"
+    "Warning: Some installed casks are deprecated or disabled.\n"
+    "You should find replacements for the following casks:\n\n  alacritty\n\n"
+    "Warning: Some installed kegs have no formulae!\n"
+    "This means they were either deleted or installed manually.\n";
+
+// "brew bundle check --verbose" com o que falta.
+const char kBundleCheckOutput[] = "brew bundle can't satisfy your Brewfile's dependencies.\n"
+                                  "\xE2\x86\x92 Cask iterm2 needs to be installed or updated.\n"
+                                  "\xE2\x86\x92 Formula figlet needs to be installed or updated.\n"
+                                  "Satisfy missing dependencies with `brew bundle install`.\n";
+
 // Uma string JSON com o texto (para montar o envelope JWS).
 inline std::string quoted(const std::string &s)
 {
@@ -263,9 +294,18 @@ struct FakeBrew {
                         "    exit 0\n"
                         "  fi\n"
                         "  echo \"executando $1\"; fail \"$1\" ;;\n"
-                        "uninstall|update|pin|unpin) echo \"executando $1\"; fail \"$1\" ;;\n"
+                        "uninstall|update|pin|unpin|tap|untap|trust) echo \"executando $1\"; fail \"$1\" ;;\n"
+                        "services)\n"
+                        "  if [ \"$2\" = list ]; then [ -f \"$D/services.json\" ] && cat \"$D/services.json\" || echo '[]'; exit 0; fi\n"
+                        "  echo \"executando services $2\"; fail services ;;\n"
+                        "tap-info) [ -f \"$D/taps.json\" ] && cat \"$D/taps.json\" || echo '[]' ;;\n"
+                        "doctor) [ -f \"$D/doctor.txt\" ] && { cat \"$D/doctor.txt\"; exit 1; }; echo 'Your system is ready to brew.' ;;\n"
                         "bundle)\n"
                         "  for a in \"$@\"; do case \"$a\" in --file=*) f=${a#--file=} ;; esac; done\n"
+                        "  if [ \"$2\" = check ]; then\n"
+                        "    [ -f \"$D/bundle-check.txt\" ] && { cat \"$D/bundle-check.txt\"; exit 1; }\n"
+                        "    echo \"The Brewfile's dependencies are satisfied.\"; exit 0\n"
+                        "  fi\n"
                         "  echo \"executando bundle $2\"; fail bundle\n"
                         "  [ \"$2\" = dump ] && echo 'brew \"curl\"' > \"$f\" ;;\n"
                         "esac\n"
@@ -285,7 +325,9 @@ struct FakeBrew {
         std::vector<std::string> out;
         for (const auto &l : readLines(log)) {
             const std::string verb = l.substr(0, l.find('|'));
-            if (verb.rfind("--", 0) == 0 || verb == "info" || verb == "list" || l.find("|--dry-run") != std::string::npos)
+            if (verb.rfind("--", 0) == 0 || verb == "info" || verb == "list" || verb == "tap-info" || verb == "doctor"
+                || l.find("|--dry-run") != std::string::npos || l == "services|list|--json"
+                || l.rfind("bundle|check|", 0) == 0)
                 continue;
             out.push_back(l);
         }

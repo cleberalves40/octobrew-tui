@@ -185,3 +185,18 @@ TEST_CASE("o tap e o filtro por ele", "[model][category]")
     CHECK(names(all, model::visibleRows(all, "another", {}, SearchMode::Description, "homebrew/cask")) == Names{"nano"});
     CHECK(model::visibleRows(all, "", {}, SearchMode::Name, "outro/tap").empty());
 }
+
+TEST_CASE("folhas: fórmulas instaladas de que nada depende, como o brew leaves", "[model][leaves]")
+{
+    std::vector<octo::Package> all = sample();   // zsh, Curl, pkg instalados; vim não
+    all[1].requiredBy = 2;                        // Curl: dependência de outros
+    octo::Package cask = pkg("kitty", "0.49", 0, 0, Status::Installed);
+    cask.kind = octo::Kind::Cask;
+    all.push_back(cask);
+    CHECK(model::isLeaf(all[0]));
+    CHECK_FALSE(model::isLeaf(all[1]));
+    CHECK_FALSE(model::isLeaf(all[3]));   // não instalado
+    CHECK_FALSE(model::isLeaf(all[4]));   // cask
+    CHECK(names(all, model::visibleRows(all, "", {}, model::SearchMode::Name, "", true)) == Names{"pkg", "zsh"});
+    CHECK(names(all, model::visibleRows(all, "z", {}, model::SearchMode::Name, "", true)) == Names{"zsh"});
+}

@@ -124,6 +124,17 @@ private:
     std::string filterPlaceholder() const;
     void openFind();
     void loadNews();
+    // Fase 4: o que só o Homebrew tem.
+    void loadServices();
+    void actService(const std::string &verb);
+    void actAddTap();
+    void actRemoveTap();
+    void actDoctor();
+    void actExportBrewfile();
+    void actImportBrewfile();
+    void toggleLeaves();
+    /** "~/Brewfile" → "$HOME/Brewfile". */
+    static std::string expandHome(const std::string &path);
     void refreshNews();
     void applyNews(const octo::NewsResult &result);
     void findStep(int delta);
@@ -171,6 +182,7 @@ private:
     model::SortSpec m_rowsSort{-2, true};
     model::SearchMode m_rowsMode = model::SearchMode::Name;
     std::string m_rowsCategory;
+    bool m_rowsLeaves = false;
     bool m_rowsDirty = true;
 
     std::string m_filter;
@@ -178,6 +190,7 @@ private:
     model::SortSpec m_sort;
     model::SearchMode m_searchMode = model::SearchMode::Name;
     std::string m_category;                    // F8 (o tap); vazio: todos
+    bool m_leavesOnly = false;                 // l: só as folhas
     bool m_categoryChooser = false;
     std::vector<std::pair<std::string, int>> m_categoryList;
     int m_categoryIndex = 0;
@@ -213,6 +226,12 @@ private:
     bool m_newsUnseen = false;
     std::atomic<bool> m_newsBusy{false};
     std::thread m_newsWorker;
+
+    std::vector<octo::Service> m_services;
+    bool m_servicesLoaded = false;
+    std::string m_servicesError;
+    std::atomic<bool> m_servicesBusy{false};
+    std::thread m_servicesWorker;
 
     Dialog m_dialog;
     Op m_onAccept;                             // Confirm
