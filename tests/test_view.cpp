@@ -93,6 +93,13 @@ bool has(const std::string &haystack, const std::string &needle)
     return haystack.find(needle) != std::string::npos;
 }
 
+// A tecla de aplicar na barra: a notação da Apple no macOS, a do mc no Linux.
+#ifdef __APPLE__
+const char kApplyKey[] = "⌥M";
+#else
+const char kApplyKey[] = "M-m";
+#endif
+
 // CHECK de cada texto de uma lista, dizendo qual faltou.
 #define CHECK_INFO(out, t)                                                                              \
     do {                                                                                                \
@@ -176,7 +183,7 @@ TEST_CASE("tela mostra colunas, linhas e estado", "[view]")
     for (const char *t : {"OctoBrew — Homebrew", "[# Installed packages]", "Name ^", "Type", "Version", "Size",
                           "Installed on", "curl", "brotli", "alacritty", "Formula", "Cask", "4.00 MiB", "25.00 MiB",
                           "Ready.", "4 package(s)", "2 outdated", "1 i Info", "2 f Files", "3 a Actions",
-                          "4 > Output", "5 n News", "6 ? Help", "F1", "F5", "F8", "F9", "F10", "+/-", "M-m"})
+                          "4 > Output", "5 n News", "6 ? Help", "F1", "F5", "F8", "F9", "F10", "+/-", kApplyKey})
         CHECK_INFO(out, t);
     // Ordem pelo nome; brotli é dependência ("d"), curl desatualizado ("U"), wget fixado ("P").
     CHECK(out.find("alacritty") < out.find("brotli"));
@@ -540,9 +547,11 @@ TEST_CASE("menus Arquivo, Busca e Ajuda, e o Sobre", "[app][menu]")
     f.app->handleEvent(Event::F9);
     REQUIRE(f.app->dialog().kind == tui::Dialog::Menu);
     std::string out = f.screen();
-    for (const char *t : {"File", "Search", "Actions", "Help", "Refresh the package list", "Update Homebrew",
-                          "Ctrl+K", "Install updates", "Clean the local cache", "Remove unneeded dependencies",
-                          "Restore a snapshot…", "Preferences…", "Exit"})
+    const std::vector<std::string> expected{"File", "Search", "Actions", "Help", "Refresh the package list",
+                                            "Update Homebrew", tui::keyLabel("Ctrl+K"), "Install updates",
+                                            "Clean the local cache", "Remove unneeded dependencies",
+                                            "Restore a snapshot…", "Preferences…", "Exit"};
+    for (const auto &t : expected)
         CHECK_INFO(out, t);
     // Instalados/Repositório pelo menu.
     f.app->handleEvent(Event::ArrowDown);
@@ -702,8 +711,8 @@ TEST_CASE("Ctrl+F busca nas abas Arquivos, Saída e Ajuda", "[app][find]")
     // Na Ajuda, encontra o próprio atalho.
     f.app.handleEvent(Event::F1);
     f.app.handleEvent(Event::Special("\x06"));
-    for (char c : std::string("Ctrl+F"))
-        f.app.handleEvent(Event::Character(c));
+    for (char c : tui::keyLabel("Ctrl+F"))   // "⌃F" no macOS: os bytes do UTF-8 entram um a um
+        f.app.handleEvent(Event::Character(std::string(1, c)));
     CHECK(f.app.viewState().findCount >= 1);
 }
 
@@ -869,7 +878,8 @@ TEST_CASE("+ e - marcam, como no OctoPkg, e Ctrl+E desfaz", "[app][actions]")
         CHECK_INFO(out, t);
     f.app->handleEvent(Event::Character('3'));
     out = f.screen();
-    for (const char *t : {"To be removed (2)", "alacritty (cask)", "curl", "Alt+M: apply"})
+    for (const std::string &t : {std::string("To be removed (2)"), std::string("alacritty (cask)"), std::string("curl"),
+                                 tui::keyText("Alt+M: apply")})
         CHECK_INFO(out, t);
 
     // Na visão Repositório, - num não instalado é recusado, e + marca.
@@ -1210,7 +1220,7 @@ TEST_CASE("aba Notícias sem rede mostra o aviso; o menu Arquivo busca de novo",
     CHECK_FALSE(s.newsError.empty());
     std::string out = draw(s);
     CHECK(has(out, "WARNING: Failed to start"));
-    CHECK(has(out, "No news yet. Ctrl+G gets the latest news."));
+    CHECK(has(out, tui::keyText("No news yet. Ctrl+G gets the latest news.")));
 
     // Pelo menu Arquivo, de outra aba: o menu leva à aba e baixa o feed.
     writeFile(f.dir.file("feed.xml"), kAtomFeed);
@@ -1266,8 +1276,9 @@ TEST_CASE("aba Serviços (7) e o serviço na aba Informação", "[app][services]
     REQUIRE(s.services.size() == 3);
     std::string out = f.screen();
     for (const char *t : {"7 s Services", "foo", "Started", "cleber", "php", "Not running", "postgresql@17", "Error",
-                          "(exit code 78)", "Homebrew menu (Alt+H)"})
+                          "(exit code 78)"})
         CHECK_INFO(out, t);
+    CHECK(has(out, tui::keyText("Homebrew menu (Alt+H)")));
     // Ctrl+F busca na aba.
     f.app->handleEvent(Event::Special("\x06"));
     type(f, "postgres");
@@ -1466,4 +1477,99 @@ TEST_CASE("num terminal de 80 colunas, as abas perdem os ícones e cabem", "[vie
     out = draw(s, 120);
     CHECK(has(out, "1 i Info"));
     CHECK(has(out, "7 s Services"));
+}
+
+// --- v1.0.1: a notação do teclado da Apple ---
+
+TEST_CASE("atalhos na notação do teclado do sistema", "[view][keys]")
+{
+#ifdef __APPLE__
+    CHECK(tui::keyLabel("Ctrl+L  /") == "⌃L  /");
+    CHECK(tui::keyLabel("F9  Alt+A Alt+B Alt+C Alt+H Alt+J") == "F9  ⌥A ⌥B ⌥C ⌥H ⌥J");
+    CHECK(tui::keyLabel("1-7  Alt+1…Alt+7") == "1-7  ⌥1…⌥7");
+    CHECK(tui::keyLabel("↑ ↓ PgUp PgDn Home End") == "↑ ↓ fn↑ fn↓ fn← fn→");
+    CHECK(tui::keyLabel("+  Insert") == "+");   // o teclado da Apple não tem Insert
+    CHECK(tui::keyLabel("-  Delete") == "-  ⌦");
+    CHECK(tui::keyLabel("Esc  Enter  Ctrl+P") == "Esc  ↩  ⌃P");
+    CHECK(tui::keyLabel("Tab") == "⇥");
+    CHECK(tui::keyText("Enter/F3: next  Shift+F3: previous") == "Enter/F3: next  ⇧F3: previous");
+    CHECK(tui::keyText("Alt+M: apply   Ctrl+E: cancel") == "⌥M: apply   ⌃E: cancel");
+#else
+    // No Linux, os nomes do teclado de PC, como estão.
+    CHECK(tui::keyLabel("Ctrl+L  /") == "Ctrl+L  /");
+    CHECK(tui::keyLabel("+  Insert") == "+  Insert");
+    CHECK(tui::keyText("Alt+M: apply") == "Alt+M: apply");
+#endif
+    CHECK(tui::keyLabel("F5") == "F5");
+    CHECK(tui::keyLabel("").empty());
+    CHECK(tui::keyText("sem atalhos") == "sem atalhos");
+}
+
+TEST_CASE("Ajuda, menus e barra de teclas na notação do sistema", "[view][keys]")
+{
+    i18n::setLocale("en_US");
+    AppFixture f;
+    f.app.handleEvent(Event::F1);
+    // A aba Ajuda inteira (a tela só mostra o começo), mais a barra de teclas.
+    std::string out = draw(f.app.viewState(), 140, 60);
+    for (const auto &l : tui::tabText(f.app.viewState()))
+        out += "\n" + l;
+    f.app.handleEvent(Event::F9);
+    const std::string menu = draw(f.app.viewState(), 140, 60);
+#ifdef __APPLE__
+    for (const char *t : {"F5  ⌃R", "⌃L  /", "F7  ⌥D", "-  ⌦", "⌥,", "↑ ↓ fn↑ fn↓ fn← fn→", "⌥MApply",
+                          "for ⌥ (Option), enable \"Use Option as Meta key\""})
+        CHECK_INFO(out, t);
+    for (const char *t : {"Ctrl+", "Alt+", "Insert", "PgUp"})
+        CHECK_FALSE(has(out, t));
+    CHECK(has(menu, "⌃K"));
+    CHECK(has(menu, "⌥,"));
+    CHECK_FALSE(has(menu, "Ctrl+"));
+#else
+    for (const char *t : {"F5  Ctrl+R", "+  Insert", "M-mApply"})
+        CHECK_INFO(out, t);
+    CHECK_FALSE(has(out, "Option"));   // a nota do teclado do Mac fica só no macOS
+    CHECK(has(menu, "Ctrl+K"));
+#endif
+}
+
+TEST_CASE("em português, com muitos arquivos, as abas perdem o nome do fim para o começo", "[view][layout]")
+{
+    i18n::setLocale("pt_BR");
+    tui::ViewState s;
+    s.iconMode = tui::IconMode::Ascii;
+    s.contentWidth = 71;   // 80 colunas
+    s.tab = tui::HelpTab;
+    s.hasCurrent = true;
+    s.current.installed = true;
+    s.detailsReady = true;
+    s.details.installed = true;
+    s.details.files.assign(832, "f");
+    std::string out = draw(s, 80);
+    // A aba atual e as primeiras ficam com o nome; a última vira só o número.
+    for (const char *t : {" 1 Informação ", " 2 Arquivos (832) ", " 6 Ajuda ", " 7 "})
+        CHECK_INFO(out, t);
+    CHECK_FALSE(has(out, "Serviços"));
+    // Na aba Serviços, é ela que fica com o nome, e outra perde o dela.
+    s.tab = tui::ServicesTab;
+    out = draw(s, 80);
+    CHECK(has(out, " 7 Serviços "));
+    CHECK_FALSE(has(out, " 6 Ajuda "));   // o "Ajuda" da barra de teclas (F1Ajuda) continua
+    i18n::setLocale("en_US");
+}
+
+TEST_CASE("na Ajuda, uma descrição longa não empurra a coluna das teclas", "[view][layout]")
+{
+    i18n::setLocale("pt_BR");
+    tui::ViewState s;
+    s.iconMode = tui::IconMode::Ascii;
+    s.tab = tui::HelpTab;
+    s.contentWidth = 71;
+    s.contentHeight = 30;
+    const std::string out = draw(s, 80, 50);
+    // "l" tem a descrição mais longa: ela começa na coluna 24, como as outras.
+    const size_t line = out.find("\nl ");
+    REQUIRE(line != std::string::npos);
+    CHECK(out.compare(line + 1 + 24, std::string("Só ").size(), "Só ") == 0);
+    i18n::setLocale("en_US");
 }

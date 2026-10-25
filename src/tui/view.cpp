@@ -186,18 +186,36 @@ Element tabs(const ViewState &s, HitBoxes *boxes)
         i18n::tr("Services"),
     };
     const char *iconOf[TabCount] = {ic.info, ic.files, ic.actions, ic.output, ic.news, ic.help, ic.services};
-    // Com as sete abas, a barra passa das 80 colunas: num terminal estreito,
-    // os ícones saem e ficam os números e os nomes.
-    size_t width = 0;
-    for (int t = 0; t < TabCount; ++t)
-        width += 8 + columns(names[t]);   // " 1 X nome " e o espaço entre as abas
-    const bool withIcons = width <= static_cast<size_t>(s.contentWidth + 9);
+    // Com as sete abas, a barra passa das 80 colunas. Num terminal estreito, os
+    // ícones saem; se ainda não couber (os nomes em português, a contagem dos
+    // arquivos), as abas perdem o nome, da última para a primeira, até caber,
+    // ficando o número e a contagem ("2 (832)"). A aba atual sempre tem o nome.
+    const size_t available = static_cast<size_t>(s.contentWidth + 9);
+    const auto extraOf = [](const std::string &n) {   // o que vem depois do nome: "(832)", "*"
+        const size_t at = n.find(" (") != std::string::npos ? n.find(" (") : n.find(" *");
+        return at == std::string::npos ? std::string() : n.substr(at + 1);
+    };
     std::string labels[TabCount];
-    for (int t = 0; t < TabCount; ++t)
-        labels[t] = withIcons ? std::string(iconOf[t]) + " " + names[t] : names[t];
+    size_t width = 0;
+    for (int t = 0; t < TabCount; ++t) {
+        labels[t] = names[t];
+        width += 5 + columns(names[t]);   // " 1 nome " (4 colunas além do nome) e o espaço entre as abas
+    }
+    if (width + 2 * TabCount <= available) {
+        for (int t = 0; t < TabCount; ++t)
+            labels[t] = std::string(iconOf[t]) + " " + names[t];
+    } else {
+        for (int t = TabCount - 1; t >= 0 && width > available; --t) {
+            if (t == s.tab)
+                continue;
+            const std::string shorter = extraOf(names[t]);
+            width -= columns(labels[t]) - columns(shorter) + (shorter.empty() ? 1 : 0);
+            labels[t] = shorter;
+        }
+    }
     Elements items;
     for (int t = 0; t < TabCount; ++t) {
-        Element e = text(std::string(" ") + tabKey(t) + " " + labels[t] + " ");
+        Element e = text(std::string(" ") + tabKey(t) + (labels[t].empty() ? "" : " " + labels[t]) + " ");
         e = t == s.tab ? e | highlight() | bold : e | faint();
         if (boxes)
             e = e | reflect(boxes->tabs[t]);
@@ -316,7 +334,7 @@ Elements filesLines(const ViewState &s)
 // No Mac, as teclas F pedem o fn: cada uma tem uma alternativa.
 std::vector<std::pair<std::string, std::string>> helpEntries()
 {
-    return {
+    std::vector<std::pair<std::string, std::string>> entries{
         {"F5  Ctrl+R", i18n::tr("Refresh the package list")},
         {"↑ ↓ PgUp PgDn Home End", i18n::tr("Move")},
         {"Ctrl+L  /", i18n::tr("Find a package in the package list")},
@@ -344,8 +362,16 @@ std::vector<std::pair<std::string, std::string>> helpEntries()
         {"F11  Alt+Z", i18n::tr("Maximize the package list, then the tabs, then back to both")},
         {"Ctrl+Q  F10  q", i18n::tr("Exit")},
         {"", i18n::tr("Click a column header to sort")},
-        {"", i18n::tr("On a Mac keyboard, F keys may need fn; Alt is Option (enable \"Use Option as Meta key\").")},
     };
+#ifdef __APPLE__
+    entries.push_back({"", i18n::tr("On a Mac keyboard, F keys may need fn; for ⌥ (Option), enable \"Use Option as Meta key\" in the terminal.")});
+#endif
+    // Na notação do teclado do sistema, na tela e na busca.
+    for (auto &e : entries) {
+        e.first = keyLabel(e.first);
+        e.second = keyText(e.second);
+    }
+    return entries;
 }
 
 Elements helpLines()
@@ -355,7 +381,8 @@ Elements helpLines()
         if (e.first.empty())
             out.push_back(text(e.second) | faint());
         else
-            out.push_back(hbox({text(e.first) | bold | size(WIDTH, EQUAL, 24), text(e.second)}));
+            // A descrição longa é cortada; a coluna das teclas fica com as 24 colunas.
+            out.push_back(hbox({text(e.first) | bold | size(WIDTH, EQUAL, 24), text(e.second) | flex}));
     }
     return out;
 }
@@ -374,11 +401,11 @@ Elements actionsLines(const ViewState &s)
             return;
         out.push_back(text(title + " (" + std::to_string(keys.size()) + ")") | bold);
         for (const auto &k : keys)
-            out.push_back(hbox({text(std::string("  ") + icon + " ") | color(c), text(keyLabel(k))}));
+            out.push_back(hbox({text(std::string("  ") + icon + " ") | color(c), text(packageLabel(k))}));
     };
     section(i18n::tr("To be installed"), s.toInstall, ic.toInstall, T().green);
     section(i18n::tr("To be removed"), s.toRemove, ic.toRemove, T().red);
-    out.push_back(text(i18n::tr("Alt+M: apply   Ctrl+E: cancel")) | faint());
+    out.push_back(text(keyText(i18n::tr("Alt+M: apply   Ctrl+E: cancel"))) | faint());
     return out;
 }
 
@@ -398,7 +425,7 @@ std::vector<std::pair<NewsLine, std::string>> newsEntries(const ViewState &s)
                                      + (s.newsFromCache && !s.news.empty() ? " " + i18n::tr("(showing the saved news)")
                                                                            : std::string())});
     if (s.news.empty() && !s.newsLoading)
-        out.push_back({NewsNote, i18n::tr("No news yet. Ctrl+G gets the latest news.")});
+        out.push_back({NewsNote, keyText(i18n::tr("No news yet. Ctrl+G gets the latest news."))});
     for (const auto &n : s.news) {
         const bool untitled = n.title.empty();
         const std::string title = untitled ? n.description : n.title;
@@ -481,7 +508,7 @@ Elements servicesLines(const ViewState &s)
         out.push_back(status == "none" || status == "stopped" ? e | faint() : e);
     }
     if (!s.services.empty())
-        out.push_back(text(i18n::tr("Homebrew menu (Alt+H): start, stop or restart the service of the selected formula."))
+        out.push_back(text(keyText(i18n::tr("Homebrew menu (Alt+H): start, stop or restart the service of the selected formula.")))
                       | faint());
     return out;
 }
@@ -540,7 +567,7 @@ Element tabContent(const ViewState &s, HitBoxes *boxes)
         result = std::to_string(s.findMatch < 0 ? 0 : 1 + s.findMatchIndex) + "/" + std::to_string(s.findCount);
     Element bar = hbox({text(i18n::tr("Find:") + " ") | bold, text(s.findText), text("█") | blink,
                         text("  " + result) | (s.findCount == 0 && !s.findText.empty() ? color(T().red) : faint()),
-                        filler(), text(i18n::tr("Enter/F3: next  Shift+F3: previous  Esc: close")) | faint()});
+                        filler(), text(keyText(i18n::tr("Enter/F3: next  Shift+F3: previous  Esc: close"))) | faint()});
     return vbox({body, bar});
 }
 
@@ -583,7 +610,13 @@ Element keyBar()
     return hbox({key("F1", i18n::tr("Help")), text(" "), key("F5", i18n::tr("Refresh")), text(" "),
                  key("F6", i18n::tr("Sort")), text(" "), key("F8", i18n::tr("Tap")), text(" "),
                  key("F9", i18n::tr("Menu")), text(" "), key("F10", i18n::tr("Exit")), text(" "),
-                 key("+/-", i18n::tr("Mark")), text(" "), key("M-m", i18n::tr("Apply")), filler()});
+                 key("+/-", i18n::tr("Mark")), text(" "),
+#ifdef __APPLE__
+                 key("⌥M", i18n::tr("Apply")),
+#else
+                 key("M-m", i18n::tr("Apply")),   // como no mc
+#endif
+                 filler()});
 }
 
 Element button(const std::string &label, bool focused, bool danger)
@@ -685,7 +718,7 @@ Element menuDialog(const Dialog &d)
                 items.push_back(sepLight());
                 continue;
             }
-            Element e = hbox({text(" " + list[i].first) | flex, text("  " + list[i].second + " ") | faint()});
+            Element e = hbox({text(" " + list[i].first) | flex, text("  " + keyLabel(list[i].second) + " ") | faint()});
             items.push_back(static_cast<int>(i) == d.item ? e | highlight() : e);
         }
     }
@@ -743,6 +776,52 @@ size_t columns(const std::string &s)
 }
 
 } // namespace
+
+std::string keyText(const std::string &text)
+{
+#ifdef __APPLE__
+    std::string out = text;
+    for (const auto &r : {std::make_pair(std::string("Ctrl+"), std::string("⌃")),
+                          std::make_pair(std::string("Alt+"), std::string("⌥")),
+                          std::make_pair(std::string("Shift+"), std::string("⇧"))})
+        for (size_t pos = 0; (pos = out.find(r.first, pos)) != std::string::npos; pos += r.second.size())
+            out.replace(pos, r.first.size(), r.second);
+    return out;
+#else
+    return text;
+#endif
+}
+
+std::string keyLabel(const std::string &keys)
+{
+#ifdef __APPLE__
+    // Palavra a palavra, mantendo os espaços que separam as alternativas.
+    static const std::vector<std::pair<std::string, std::string>> names{
+        {"PgUp", "fn↑"}, {"PgDn", "fn↓"}, {"Home", "fn←"}, {"End", "fn→"},
+        {"Delete", "⌦"}, {"Enter", "↩"}, {"Tab", "⇥"}};
+    std::vector<std::string> words;
+    size_t start = 0;
+    for (;;) {
+        const size_t space = keys.find(' ', start);
+        std::string w = keys.substr(start, space == std::string::npos ? std::string::npos : space - start);
+        for (const auto &n : names)
+            if (w == n.first)
+                w = n.second;
+        if (w != "Insert")
+            words.push_back(w);
+        if (space == std::string::npos)
+            break;
+        start = space + 1;
+    }
+    std::string out;
+    for (size_t i = 0; i < words.size(); ++i)
+        out += (i ? " " : "") + words[i];
+    out.erase(out.find_last_not_of(' ') + 1);
+    return keyText(out);
+#else
+    return keys;
+#endif
+}
 
 std::vector<std::string> wrapText(const std::string &text, int width)
 {
@@ -848,7 +927,7 @@ std::string columnTitle(int column)
     }
 }
 
-std::string keyLabel(const std::string &key)
+std::string packageLabel(const std::string &key)
 {
     if (key.rfind("c:", 0) == 0)
         return key.substr(2) + " (cask)";

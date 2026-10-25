@@ -162,7 +162,7 @@ const Entry kEntries[] = {
     {"(all taps)", "(todos os taps)", "(todos los taps)"},
     {"Tap: %1", "Tap: %1", "Tap: %1"},
     {"Choose the sort column (again: reverse; (brew order): original order)", "Escolher a coluna de ordenação (de novo: inverter; (ordem do brew): ordem original)", "Elegir la columna de orden (otra vez: invertir; (orden de brew): orden original)"},
-    {"On a Mac keyboard, F keys may need fn; Alt is Option (enable \"Use Option as Meta key\").", "No teclado do Mac, as teclas F podem pedir o fn; Alt é o Option (ative \"Usar Option como tecla Meta\").", "En el teclado del Mac, las teclas F pueden requerir fn; Alt es Option (active \"Usar Option como tecla Meta\")."},
+    {"On a Mac keyboard, F keys may need fn; for ⌥ (Option), enable \"Use Option as Meta key\" in the terminal.", "No teclado do Mac, as teclas F podem pedir o fn; para o ⌥ (Option), ative \"Usar Option como tecla Meta\" no terminal.", "En el teclado del Mac, las teclas F pueden requerir fn; para ⌥ (Option), active \"Usar Option como tecla Meta\" en el terminal."},
 
     // Transações (Fase 2)
     {"No packages selected.", "Nenhum pacote selecionado.", "Ningún paquete seleccionado."},

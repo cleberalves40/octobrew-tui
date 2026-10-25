@@ -130,6 +130,17 @@ struct HitBoxes {
     int contentLines = 0;              // linhas da aba atual, para limitar a rolagem
 };
 
+/**
+ * Uma coluna de atalhos ("Ctrl+L  /", "F9  Alt+A Alt+B") como o teclado do
+ * sistema a mostra. No macOS, a notação dos menus da Apple: ⌃L, ⌥A, ⇧F3, fn↑
+ * (PgUp), fn↓, fn← (Home), fn→ (End), ⌦ (o Delete, fn⌫), ↩ (Enter) e ⇥ (Tab),
+ * sem o Insert, que o teclado da Apple não tem. No Linux, como está. ⌘ não
+ * aparece: o terminal não repassa o Command ao programa.
+ */
+std::string keyLabel(const std::string &keys);
+/** Um texto com atalhos ("Alt+M: apply   Ctrl+E: cancel"): no macOS, Ctrl+, Alt+ e Shift+ viram ⌃, ⌥ e ⇧. */
+std::string keyText(const std::string &text);
+
 /** Rótulo da coluna. */
 std::string columnTitle(int column);
 /** O estado de um serviço, traduzido ("started" → "Started"). */
@@ -137,7 +148,7 @@ std::string serviceStatusText(const std::string &status);
 /** "Formula" ou "Cask", traduzido. */
 std::string kindText(octo::Kind kind);
 /** Um pacote pela chave, para as listas ("f:curl" → "curl", "c:kitty" → "kitty (cask)"). */
-std::string keyLabel(const std::string &key);
+std::string packageLabel(const std::string &key);
 /** Estado do pacote por extenso ("Outdated (version 2.0 is available)"). */
 std::string statusText(const octo::Package &p);
 
