@@ -45,6 +45,7 @@ struct Package {
     std::string newVersion;         // versão disponível, se desatualizado
     std::vector<std::string> dependencies;   // diretas, de execução (só instalados)
     std::vector<std::string> paths;          // casks instalados: onde os artifacts foram parar
+    bool hasService = false;                 // a fórmula define um serviço (brew services)
     Status status = Status::NotInstalled;
 
     /**
@@ -99,6 +100,31 @@ struct TransactionPreview {
     int count() const;
     /** Itens das seções com o verbo (vazio: todas). */
     std::vector<std::string> items(const std::string &verb = std::string()) const;
+};
+
+/** Um serviço do "brew services list --json" (launchd no macOS, systemd no Linux). */
+struct Service {
+    std::string name;
+    std::string status;     // none, started, stopped, scheduled, error, unknown
+    std::string user;       // quem o iniciou; vazio se não está carregado
+    std::string file;       // o plist ou a unit
+    int exitCode = -1;      // -1: sem código
+};
+
+/** Um tap do "brew tap-info --json --installed". */
+struct Tap {
+    std::string name;       // "user/repo"
+    bool official = false;  // homebrew/core, homebrew/cask
+    bool trusted = false;   // brew trust --tap (brew 6+); os oficiais sempre
+    std::vector<std::string> formulae;   // nomes completos ("user/repo/foo")
+    std::vector<std::string> casks;
+};
+
+/** O "brew doctor": sai com 1 quando há avisos, o que não é uma falha. */
+struct DoctorReport {
+    bool ready = false;                  // "Your system is ready to brew."
+    std::vector<std::string> warnings;   // os títulos ("Some installed casks are deprecated or disabled.")
+    std::string output;                  // tudo, para a aba Saída
 };
 
 /** Função que recebe a saída de uma operação à medida que ela roda. */
@@ -171,6 +197,21 @@ bool isForbidden(const Package &p);
  */
 bool caskNeedsSudo(const std::string &infoJson, const std::string &token);
 
+// --- Fase 4: serviços, taps, doctor e Brewfiles (funções puras) ---
+
+std::vector<Service> parseServices(const std::string &json);
+std::vector<Tap> parseTaps(const std::string &json);
+/**
+ * Os pacotes dos taps de terceiros, que o cache da API não tem: só o nome e o
+ * tap (a versão e a descrição vêm do brew info, nos detalhes).
+ */
+std::vector<Package> tapPackages(const std::vector<Tap> &taps);
+DoctorReport parseDoctor(const std::string &output);
+/** O que falta de um Brewfile, no "brew bundle check --verbose": "Formula figlet", "Cask iterm2". */
+std::vector<std::string> parseBundleCheck(const std::string &output);
+/** "user/repo", como o brew tap aceita (sem URL). */
+bool validTapName(const std::string &name);
+
 /** Nome de um snapshot antes da transação, como o do Boot Environment: "AAMMDD-hhmmss.Brewfile". */
 std::string snapshotName(std::time_t when);
 /** Os snapshots em dir, do mais novo ao mais antigo (só os nomes). */
@@ -189,8 +230,12 @@ public:
     explicit Manager(std::string brewPath = std::string());
 
     std::vector<Package> listInstalled() const;
-    /** Do cache da API, sem rede e sem o Ruby do brew. */
-    std::vector<Package> listRemote() const;
+    /**
+     * Do cache da API, sem rede e sem o Ruby do brew, mais os pacotes dos taps
+     * de terceiros (brew tap-info). Se só o tap-info falhar, warning diz por
+     * quê, e a lista fica com os da API.
+     */
+    std::vector<Package> listRemote(std::string *warning = nullptr) const;
     /** brew info, mais brew list nos instalados (a aba Arquivos). */
     Details details(const Package &p) const;
     /** Tamanho de cada instalado, por Package::key(); os que não deram para medir ficam de fora. */
@@ -222,6 +267,18 @@ public:
     void snapshot(const std::string &file, const OutputFn &out = nullptr) const;
     /** brew bundle install: instala o que falta do Brewfile, sem atualizar o resto. */
     void restore(const std::string &file, const OutputFn &out = nullptr, bool interactive = false) const;
+
+    // --- Fase 4 ---
+    std::vector<Service> listServices() const;
+    /** brew services start|stop|restart nome (do usuário, sem sudo). */
+    void service(const std::string &verb, const std::string &name, const OutputFn &out = nullptr) const;
+    std::vector<Tap> listTaps() const;
+    /** brew tap user/repo e, com trust, brew trust --tap user/repo. */
+    void tap(const std::string &name, bool trust, const OutputFn &out = nullptr) const;
+    void untap(const std::string &name, const OutputFn &out = nullptr) const;
+    DoctorReport doctor() const;
+    /** brew bundle check --verbose: o que falta do Brewfile (vazio: nada). */
+    std::vector<std::string> bundleCheck(const std::string &file) const;
 
     /** Linha de comando de uma operação, para a aba Saída ("brew install --formula curl"). */
     std::string commandLine(const std::vector<std::string> &args) const;

@@ -41,8 +41,13 @@ std::vector<std::pair<std::string, int>> categories(const std::vector<octo::Pack
     return {count.begin(), count.end()};
 }
 
+bool isLeaf(const octo::Package &p)
+{
+    return p.installed && p.kind == octo::Kind::Formula && p.requiredBy == 0;
+}
+
 std::vector<int> visibleRows(const std::vector<octo::Package> &all, const std::string &filter, SortSpec sort,
-                             SearchMode mode, const std::string &cat)
+                             SearchMode mode, const std::string &cat, bool leavesOnly)
 {
     const std::string needle = lower(filter);
     std::vector<int> rows;
@@ -50,6 +55,8 @@ std::vector<int> visibleRows(const std::vector<octo::Package> &all, const std::s
     for (size_t i = 0; i < all.size(); ++i) {
         keys[i] = lower(all[i].name);
         if (!cat.empty() && category(all[i]) != cat)
+            continue;
+        if (leavesOnly && !isLeaf(all[i]))
             continue;
         bool match = needle.empty() || keys[i].find(needle) != std::string::npos;
         if (!match && mode == SearchMode::Description)

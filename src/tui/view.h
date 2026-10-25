@@ -18,9 +18,10 @@ namespace tui {
 
 /**
  * As abas do OctoPkg, com as teclas dele: Alt+1 Informação, Alt+2 Arquivos,
- * Alt+3 Ações, Alt+4 Saída, Alt+5 Notícias e Alt+6 Ajuda.
+ * Alt+3 Ações, Alt+4 Saída, Alt+5 Notícias e Alt+6 Ajuda; e a do Homebrew,
+ * Alt+7 Serviços (brew services).
  */
-enum Tab { InfoTab = 0, FilesTab, ActionsTab, OutputTab, NewsTab, HelpTab, TabCount };
+enum Tab { InfoTab = 0, FilesTab, ActionsTab, OutputTab, NewsTab, HelpTab, ServicesTab, TabCount };
 
 /**
  * Disposição da tela, como o F10/F11 do OctoPkg (maximizar a lista ou as
@@ -28,7 +29,7 @@ enum Tab { InfoTab = 0, FilesTab, ActionsTab, OutputTab, NewsTab, HelpTab, TabCo
  */
 enum class Layout { Normal = 0, ListOnly, TabsOnly };
 
-/** Tecla da aba ('1' a '6'). */
+/** Tecla da aba ('1' a '7'). */
 char tabKey(int tab);
 
 struct DialogField {
@@ -76,6 +77,7 @@ struct ViewState {
     model::SortSpec sort;
     model::SearchMode searchMode = model::SearchMode::Name;
     std::string category;              // filtro por tap; vazio: todos
+    bool leavesOnly = false;           // l: só as folhas (brew leaves)
     bool categoryChooserOpen = false;  // F8
     std::vector<std::pair<std::string, int>> categories;   // os taps da visão, com a contagem
     int categoryIndex = 0;             // 0 = todos, 1… = categories
@@ -113,6 +115,11 @@ struct ViewState {
     bool newsFromCache = false;
     bool newsUnseen = false;           // há notícias novas que ainda não foram vistas
     std::string newsError;
+    // Aba Serviços.
+    std::vector<octo::Service> services;
+    bool servicesLoaded = false;
+    bool servicesLoading = false;
+    std::string servicesError;
 };
 
 /** Posições na tela, para o mouse, e o tamanho do conteúdo da aba. */
@@ -125,6 +132,8 @@ struct HitBoxes {
 
 /** Rótulo da coluna. */
 std::string columnTitle(int column);
+/** O estado de um serviço, traduzido ("started" → "Started"). */
+std::string serviceStatusText(const std::string &status);
 /** "Formula" ou "Cask", traduzido. */
 std::string kindText(octo::Kind kind);
 /** Um pacote pela chave, para as listas ("f:curl" → "curl", "c:kitty" → "kitty (cask)"). */
@@ -133,7 +142,7 @@ std::string keyLabel(const std::string &key);
 std::string statusText(const octo::Package &p);
 
 /**
- * Texto das linhas das abas em que Ctrl+F busca (Arquivos, Saída, Notícias e Ajuda),
+ * Texto das linhas das abas em que Ctrl+F busca (Arquivos, Saída, Notícias, Ajuda e Serviços),
  * uma por linha desenhada; vazio nas outras.
  */
 std::vector<std::string> tabText(const ViewState &state);

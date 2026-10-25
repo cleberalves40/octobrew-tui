@@ -5,6 +5,43 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 e o projeto usa [versionamento semântico](https://semver.org/lang/pt-BR/),
 com tags no formato `vX.Y.Z`.
 
+## [0.4.0] - 2026-10-25
+
+O que só o Homebrew tem (Fase 4 do [roadmap](docs/ROADMAP.md)): serviços, taps, folhas,
+`brew doctor` e Brewfiles, no novo menu **Homebrew** (**Alt+H**).
+
+### Adicionado
+- Aba **Serviços** (**7** ou **Alt+7**): os serviços das fórmulas instaladas
+  (`brew services list --json`), com o estado (iniciado, parado, agendado, erro, não
+  está rodando), quem o iniciou, o código de saída e o plist. Ela é lida em segundo
+  plano na primeira visita, com F5 e depois de cada ação, e o Ctrl+F busca nela.
+  Homebrew → Iniciar, Parar e Reiniciar o serviço da fórmula selecionada
+  (`brew services start|stop|restart`). A aba Informação mostra o serviço da fórmula.
+- **Folhas** (**l**, ou o menu Busca): só as fórmulas instaladas de que nenhum outro
+  instalado depende, como o `brew leaves`; o que dá para remover sem levar nada junto.
+  O cabeçalho mostra "· leaves", e combina com o filtro e com o tap.
+- **Taps:** Homebrew → Adicionar um tap… (`brew tap user/repo`, com a opção de
+  `brew trust --tap`, sem a qual o brew 6+ não carrega os pacotes de um tap de
+  terceiros) e Remover um tap… (`brew untap`), que antes diz quais pacotes do tap estão
+  instalados, porque o brew recusa o untap com eles.
+- A visão Repositório inclui os pacotes dos **taps de terceiros**, que o cache da API não
+  tem (`brew tap-info --json --installed`: o nome e o tap; a versão e a descrição vêm
+  dos detalhes). Se o tap-info falhar, ficam os da API, com o aviso na aba Saída.
+- Homebrew → **Verificar o sistema** (`brew doctor`): "pronto para o brew" ou a lista
+  dos avisos, com o texto completo na aba Saída. O doctor sai com 1 quando há avisos, e
+  isso não é tratado como falha.
+- Homebrew → **Exportar um Brewfile…** (`brew bundle dump`, pergunta antes de trocar um
+  arquivo que existe) e **Instalar de um Brewfile…**: a prévia é o
+  `brew bundle check --verbose` (o que falta), e a operação, o
+  `brew bundle install --no-upgrade`; com casks e o sudo sem senha em cache, a tela é
+  suspensa.
+- Num terminal estreito (as sete abas passam de 80 colunas), as abas perdem os ícones e
+  ficam os números e os nomes.
+- Testes: os serviços, os taps (e os pacotes deles no repositório), o doctor, o bundle
+  check, cada ação contra o brew falso, as folhas no modelo e na tela, as abas em 80
+  colunas e, na integração, os serviços, os taps, o doctor e o bundle check do brew real
+  (só leitura).
+
 ## [0.3.0] - 2026-10-25
 
 A aba Notícias (Fase 3 do [roadmap](docs/ROADMAP.md)): agora todas as abas do OctoPkg

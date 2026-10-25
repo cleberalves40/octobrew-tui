@@ -6,8 +6,10 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <cstdlib>
 #include <ctime>
 #include <fstream>
+#include <unistd.h>
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/mouse.hpp>
 #include <ftxui/component/screen_interactive.hpp>
@@ -31,6 +33,7 @@ const std::string kAltA = "\x1b" "a";
 const std::string kAltB = "\x1b" "b";
 const std::string kAltC = "\x1b" "c";
 const std::string kAltD = "\x1b" "d";
+const std::string kAltH = "\x1b" "h";
 const std::string kAltI = "\x1b" "i";
 const std::string kAltJ = "\x1b" "j";
 const std::string kAltM = "\x1b" "m";
@@ -41,7 +44,7 @@ const std::string kCtrlF = "\x06";
 const std::string kCtrlG = "\x07";
 const std::string kShiftF3 = "\x1b[1;2R";   // xterm; o FTXUI não tem um evento próprio
 
-enum Menus { FileMenu = 0, SearchMenu, ActionsMenu, HelpMenu };
+enum Menus { FileMenu = 0, SearchMenu, ActionsMenu, BrewMenu, HelpMenu };
 
 // Linhas fixas da tela: título, separadores, cabeçalho, abas, status e teclas.
 constexpr int kFixedLines = 9;
@@ -84,6 +87,12 @@ std::string bulletList(const std::vector<std::string> &items)
         out += "  " + i18n::trf("… and %1 more (see the Output tab)", {std::to_string(items.size() - kDialogItems)})
                + "\n";
     return out;
+}
+
+std::string trimmed(const std::string &s)
+{
+    const size_t b = s.find_first_not_of(" \t");
+    return b == std::string::npos ? std::string() : s.substr(b, s.find_last_not_of(" \t") - b + 1);
 }
 
 std::vector<std::string> names(const std::vector<octo::Package> &packages)
@@ -144,6 +153,8 @@ App::~App()
 
 void App::joinWorkers()
 {
+    if (m_servicesWorker.joinable())
+        m_servicesWorker.join();
     if (m_newsWorker.joinable())
         m_newsWorker.join();
     if (m_worker.joinable())
@@ -179,7 +190,7 @@ void App::refresh()
         try {
             l.installed = m_mgr.listInstalled();
             if (withRemote) {
-                l.remote = m_mgr.listRemote();
+                l.remote = m_mgr.listRemote(&l.warning);
                 l.hasRemote = true;
             }
         } catch (const std::exception &e) {
@@ -327,9 +338,10 @@ void App::toggleView()
 const std::vector<int> &App::rows()
 {
     if (m_rowsDirty || m_rowsFilter != m_filter || !(m_rowsSort == m_sort) || m_rowsMode != m_searchMode
-        || m_rowsCategory != m_category) {
-        m_rows = model::visibleRows(m_all, m_filter, m_sort, m_searchMode, m_category);
+        || m_rowsCategory != m_category || m_rowsLeaves != m_leavesOnly) {
+        m_rows = model::visibleRows(m_all, m_filter, m_sort, m_searchMode, m_category, m_leavesOnly);
         m_rowsCategory = m_category;
+        m_rowsLeaves = m_leavesOnly;
         m_rowsFilter = m_filter;
         m_rowsSort = m_sort;
         m_rowsMode = m_searchMode;
@@ -472,6 +484,11 @@ ViewState App::viewState()
     s.sort = m_sort;
     s.searchMode = m_searchMode;
     s.category = m_category;
+    s.leavesOnly = m_leavesOnly;
+    s.services = m_services;
+    s.servicesLoaded = m_servicesLoaded;
+    s.servicesLoading = m_servicesBusy;
+    s.servicesError = m_servicesError;
     s.categoryChooserOpen = m_categoryChooser;
     s.categories = m_categoryList;
     s.categoryIndex = m_categoryIndex;
@@ -554,6 +571,8 @@ void App::setTab(int tab)
         if (!m_newsStarted)
             loadNews();
     }
+    if (tab == ServicesTab && !m_servicesLoaded)
+        loadServices();
     m_contentScroll = 0;
     if (tab == OutputTab && m_contentFocused)
         m_contentScroll = std::max(0, static_cast<int>(m_log.size()) - m_contentHeight);
@@ -960,6 +979,258 @@ void App::actRestore()
     m_dialog.focus = 0;
 }
 
+// ---------------------------------------------------------------------------
+// Fase 4: serviços, taps, folhas, doctor e Brewfiles
+// ---------------------------------------------------------------------------
+
+std::string App::expandHome(const std::string &path)
+{
+    const std::string p = trimmed(path);
+    if (p == "~" || p.rfind("~/", 0) == 0) {
+        const char *home = std::getenv("HOME");
+        return std::string(home ? home : "") + p.substr(1);
+    }
+    return p;
+}
+
+void App::loadServices()
+{
+    // Como as notícias: em segundo plano, e a aba mostra "Carregando…".
+    if (m_servicesBusy)
+        return;
+    m_servicesBusy = true;
+    const auto load = [this](std::string *error) {
+        try {
+            return m_mgr.listServices();
+        } catch (const std::exception &e) {
+            *error = e.what();
+        }
+        return std::vector<octo::Service>();
+    };
+    const auto apply = [this](const std::vector<octo::Service> &list, const std::string &error) {
+        m_servicesBusy = false;
+        m_servicesLoaded = true;
+        m_servicesError = error;
+        if (error.empty())
+            m_services = list;
+        else
+            log(i18n::trf("WARNING: %1", {error}));
+    };
+    if (!m_screen) {   // testes
+        std::string error;
+        const auto list = load(&error);
+        apply(list, error);
+        return;
+    }
+    if (m_servicesWorker.joinable())
+        m_servicesWorker.join();
+    m_servicesWorker = std::thread([this, load, apply] {
+        std::string error;
+        const auto list = load(&error);
+        m_screen->Post([apply, list, error] { apply(list, error); });
+        m_screen->PostEvent(Event::Custom);
+    });
+}
+
+void App::actService(const std::string &verb)
+{
+    const octo::Package *p = current();
+    if (!p || !p->installed || p->kind != octo::Kind::Formula) {
+        m_status = i18n::tr("Select an installed formula.");
+        return;
+    }
+    if (!p->hasService) {
+        m_status = i18n::trf("%1 has no service.", {p->name});
+        return;
+    }
+    const std::string name = p->name;
+    const std::string status = verb == "start"  ? i18n::trf("Starting the service %1…", {name})
+                               : verb == "stop" ? i18n::trf("Stopping the service %1…", {name})
+                                                : i18n::trf("Restarting the service %1…", {name});
+    runOperation(status, m_mgr.commandLine({"services", verb, name}),
+                 [this, verb, name](const octo::OutputFn &out, bool) { m_mgr.service(verb, name, out); },
+                 [this] {
+                     m_servicesLoaded = false;
+                     loadServices();
+                 });
+}
+
+void App::toggleLeaves()
+{
+    m_leavesOnly = !m_leavesOnly;
+    m_status = m_leavesOnly ? i18n::tr("Only leaves: installed formulae that no other installed package needs.")
+                            : i18n::tr("All packages.");
+}
+
+void App::actAddTap()
+{
+    if (refuseWhileBusy())
+        return;
+    DialogField name;
+    name.kind = DialogField::Text;
+    name.label = i18n::tr("Tap (user/repo):");
+    name.hint = i18n::tr("From GitHub: user/homebrew-repo.");
+    DialogField trust;
+    trust.kind = DialogField::Check;
+    trust.label = i18n::tr("Trust its formulae and casks (brew trust --tap)");
+    trust.hint = i18n::tr("Homebrew only loads packages from trusted third-party taps.");
+    showForm(i18n::tr("Add a tap"), std::string(), {name, trust}, false, [this](const std::vector<DialogField> &f) {
+        const std::string tap = trimmed(f[0].text);
+        if (!octo::validTapName(tap)) {
+            showMessage(i18n::tr("Error"), i18n::trf("Invalid tap name: %1 (use user/repo)", {tap}));
+            return;
+        }
+        const bool trust = f[1].checked;
+        runOperation(i18n::trf("Adding the tap %1…", {tap}),
+                     m_mgr.commandLine({"tap", tap}) + (trust ? "; " + m_mgr.commandLine({"trust", "--tap", tap}) : std::string()),
+                     [this, tap, trust](const octo::OutputFn &out, bool) { m_mgr.tap(tap, trust, out); },
+                     // Os pacotes do tap entram na visão Repositório na próxima leitura.
+                     [this, tap] {
+                         m_hasRemote = m_remoteView;
+                         showMessage(i18n::tr("Command finished OK!"), i18n::trf("Tap added: %1", {tap}) + "\n"
+                                                                           + i18n::tr("Its packages are in the repository view (i)."));
+                     });
+    });
+    m_dialog.focus = 0;
+}
+
+void App::actRemoveTap()
+{
+    if (refuseWhileBusy())
+        return;
+    runTask(i18n::tr("Listing the taps…"), [this]() -> Op {
+        std::vector<octo::Tap> taps;
+        for (auto &t : m_mgr.listTaps())
+            if (!t.official)
+                taps.push_back(std::move(t));
+        return [this, taps] {
+            if (taps.empty()) {
+                showMessage(i18n::tr("Remove a tap"), i18n::tr("There are no third-party taps."));
+                return;
+            }
+            DialogField f;
+            f.kind = DialogField::Choice;
+            f.label = i18n::tr("Tap:");
+            for (const auto &t : taps)
+                f.choices.push_back(t.name + "  (" + std::to_string(t.formulae.size() + t.casks.size()) + ")"
+                                    + (t.trusted ? "" : "  " + i18n::tr("untrusted")));
+            showForm(i18n::tr("Remove a tap"), std::string(), {f}, false, [this, taps](const std::vector<DialogField> &fields) {
+                const octo::Tap tap = taps[static_cast<size_t>(fields[0].choice)];
+                // O brew recusa o untap com pacotes do tap instalados: melhor dizer quais.
+                std::vector<std::string> used;
+                for (const auto &p : m_installed)
+                    if (p.tap == tap.name)
+                        used.push_back(p.fullName);
+                if (!used.empty()) {
+                    showMessage(i18n::tr("Remove a tap"), i18n::trf("These packages from %1 are installed; remove them first:", {tap.name})
+                                                              + "\n" + bulletList(used));
+                    return;
+                }
+                showConfirm(i18n::tr("Remove a tap"), i18n::trf("Remove the tap %1?", {tap.name}), true, [this, tap] {
+                    runOperation(i18n::trf("Removing the tap %1…", {tap.name}), m_mgr.commandLine({"untap", tap.name}),
+                                 [this, tap](const octo::OutputFn &out, bool) { m_mgr.untap(tap.name, out); },
+                                 [this] { m_hasRemote = m_remoteView; });
+                });
+            });
+            m_dialog.focus = 0;
+        };
+    });
+}
+
+void App::actDoctor()
+{
+    if (refuseWhileBusy())
+        return;
+    runTask(i18n::tr("Checking the system (brew doctor)…"), [this]() -> Op {
+        const octo::DoctorReport r = m_mgr.doctor();
+        return [this, r] {
+            log("brew doctor");
+            appendOutput(r.output + "\n");
+            if (r.warnings.empty()) {
+                showMessage(i18n::tr("Check the system"), r.ready ? i18n::tr("Your system is ready to brew.")
+                                                                  : i18n::tr("brew doctor found no warnings."));
+                return;
+            }
+            showMessage(i18n::tr("Check the system"),
+                        i18n::trf("brew doctor found %1 warning(s):", {std::to_string(r.warnings.size())}) + "\n"
+                            + bulletList(r.warnings) + "\n" + i18n::tr("Details in the Output tab."));
+        };
+    });
+}
+
+void App::actExportBrewfile()
+{
+    if (refuseWhileBusy())
+        return;
+    DialogField f;
+    f.kind = DialogField::Text;
+    f.label = i18n::tr("File:");
+    f.text = "~/Brewfile";
+    f.hint = i18n::tr("Taps, formulae and casks installed now (brew bundle dump).");
+    showForm(i18n::tr("Export a Brewfile"), std::string(), {f}, false, [this](const std::vector<DialogField> &fields) {
+        const std::string file = expandHome(fields[0].text);
+        if (file.empty())
+            return;
+        const auto run = [this, file] {
+            runOperation(i18n::tr("Exporting the Brewfile…"), m_mgr.commandLine({"bundle", "dump", "--file=" + file, "--force"}),
+                         [this, file](const octo::OutputFn &out, bool) { m_mgr.snapshot(file, out); },
+                         [this, file] { showMessage(i18n::tr("Command finished OK!"), i18n::trf("Brewfile saved: %1", {file})); });
+        };
+        if (::access(file.c_str(), F_OK) == 0)
+            showConfirm(i18n::tr("Export a Brewfile"), i18n::trf("%1 already exists. Replace it?", {file}), true, run);
+        else
+            run();
+    });
+    m_dialog.focus = 0;
+}
+
+void App::actImportBrewfile()
+{
+    if (refuseWhileBusy())
+        return;
+    DialogField f;
+    f.kind = DialogField::Text;
+    f.label = i18n::tr("File:");
+    f.text = "~/Brewfile";
+    f.hint = i18n::tr("Installs what is missing from it; nothing is removed or upgraded.");
+    showForm(i18n::tr("Install from a Brewfile"), std::string(), {f}, false, [this](const std::vector<DialogField> &fields) {
+        const std::string file = expandHome(fields[0].text);
+        // A prévia: o que falta, pelo brew bundle check.
+        runTask(i18n::tr("Collecting transaction data…"), [this, file]() -> Op {
+            const std::vector<std::string> missing = m_mgr.bundleCheck(file);
+            return [this, file, missing] {
+                if (missing.empty()) {
+                    showMessage(i18n::tr("Install from a Brewfile"), i18n::trf("Everything in %1 is already installed.", {file}));
+                    return;
+                }
+                bool casks = false;
+                for (const auto &m : missing)
+                    casks = casks || m.rfind("Cask ", 0) == 0;
+                const bool terminal = casks && !sudoReady();
+                log(i18n::tr("Transaction:"));
+                for (const auto &m : missing)
+                    log("  + " + m);
+                const std::string message = i18n::trf("The following %1 packages need to be retrieved", {std::to_string(missing.size())})
+                                            + "\n" + bulletList(missing) + "\n"
+                                            + (terminal ? i18n::tr("The screen will be suspended while sudo asks for your password.") + "\n\n"
+                                                        : std::string())
+                                            + i18n::tr("Confirm?");
+                showConfirm(i18n::tr("Install from a Brewfile"), message, false, [this, file, terminal] {
+                    runOperation(i18n::tr("Installing from the Brewfile…"),
+                                 m_mgr.commandLine({"bundle", "install", "--file=" + file, "--no-upgrade"}),
+                                 [this, file](const octo::OutputFn &out, bool interactive) { m_mgr.restore(file, out, interactive); },
+                                 [this, file] {
+                                     showMessage(i18n::tr("Command finished OK!"),
+                                                 i18n::trf("Installed from: %1", {file}) + "\n" + i18n::tr("Details in the Output tab."));
+                                 },
+                                 terminal);
+                });
+            };
+        });
+    });
+    m_dialog.focus = 0;
+}
+
 void App::actAbout()
 {
     std::string brewVersion;
@@ -1131,8 +1402,8 @@ void App::actPreferences()
 
 void App::openFind()
 {
-    // Como o Ctrl+F do OctoPkg: nas abas Arquivos, Saída, Notícias e Ajuda.
-    if (m_tab != FilesTab && m_tab != OutputTab && m_tab != NewsTab && m_tab != HelpTab) {
+    // Como o Ctrl+F do OctoPkg: nas abas Arquivos, Saída, Notícias e Ajuda, e na de Serviços.
+    if (m_tab != FilesTab && m_tab != OutputTab && m_tab != NewsTab && m_tab != HelpTab && m_tab != ServicesTab) {
         m_status = i18n::tr("Find works in the Files, Output, News and Help tabs.");
         return;
     }
@@ -1448,7 +1719,7 @@ void App::openMenu(int menu)
 {
     m_dialog = Dialog{};
     m_dialog.kind = Dialog::Menu;
-    m_dialog.menus = {i18n::tr("File"), i18n::tr("Search"), i18n::tr("Actions"), i18n::tr("Help")};
+    m_dialog.menus = {i18n::tr("File"), i18n::tr("Search"), i18n::tr("Actions"), "Homebrew", i18n::tr("Help")};
     const bool byName = m_searchMode == model::SearchMode::Name;
     const auto sep = std::make_pair(std::string(), std::string());
     m_dialog.items = {
@@ -1474,7 +1745,9 @@ void App::openMenu(int menu)
          {i18n::tr("All taps"), ""},
          sep,
          {i18n::tr("Find a package in the package list"), "Ctrl+L"},
-         {i18n::tr("Find text in the tab"), "Ctrl+F"}},
+         {i18n::tr("Find text in the tab"), "Ctrl+F"},
+         sep,
+         {std::string(m_leavesOnly ? "• " : "  ") + i18n::tr("Only leaves (brew leaves)"), "l"}},
         {{i18n::tr("Mark for installation"), "+"},
          {i18n::tr("Mark for removal"), "-"},
          sep,
@@ -1483,6 +1756,18 @@ void App::openMenu(int menu)
          sep,
          {i18n::tr("Pin"), ""},
          {i18n::tr("Unpin"), ""}},
+        {{i18n::tr("Services"), "7"},
+         {i18n::tr("Start the service"), ""},
+         {i18n::tr("Stop the service"), ""},
+         {i18n::tr("Restart the service"), ""},
+         sep,
+         {i18n::tr("Add a tap…"), ""},
+         {i18n::tr("Remove a tap…"), ""},
+         sep,
+         {i18n::tr("Export a Brewfile…"), ""},
+         {i18n::tr("Install from a Brewfile…"), ""},
+         sep,
+         {i18n::tr("Check the system (brew doctor)"), ""}},
         {{i18n::tr("Keyboard shortcuts"), "F1"}, {i18n::tr("About"), ""}},
     };
     m_menuActions = {
@@ -1493,9 +1778,13 @@ void App::openMenu(int menu)
         {[this] { setSearchMode(model::SearchMode::Name); },
          [this] { setSearchMode(model::SearchMode::Description); }, nullptr,
          [this] { openCategoryChooser(); }, [this] { setCategory(std::string()); }, nullptr,
-         [this] { m_filterMode = true; m_contentFocused = false; }, [this] { openFind(); }},
+         [this] { m_filterMode = true; m_contentFocused = false; }, [this] { openFind(); }, nullptr,
+         [this] { toggleLeaves(); }},
         {[this] { markInstall(); }, [this] { markRemove(); }, nullptr, [this] { actApply(); },
          [this] { clearMarks(); }, nullptr, [this] { actPin(true); }, [this] { actPin(false); }},
+        {[this] { setTab(ServicesTab); }, [this] { actService("start"); }, [this] { actService("stop"); },
+         [this] { actService("restart"); }, nullptr, [this] { actAddTap(); }, [this] { actRemoveTap(); }, nullptr,
+         [this] { actExportBrewfile(); }, [this] { actImportBrewfile(); }, nullptr, [this] { actDoctor(); }},
         {[this] { setTab(HelpTab); }, [this] { actAbout(); }},
     };
     m_dialog.menu = std::max(0, std::min(menu, static_cast<int>(m_dialog.menus.size()) - 1));
@@ -1709,6 +1998,8 @@ bool App::handleEvent(const Event &event)
     // No teclado do Mac, as teclas F pedem o fn: cada uma tem uma alternativa.
     if (event == Event::F5 || raw == kCtrlR) {
         m_operationError.clear();
+        if (m_tab == ServicesTab)
+            loadServices();
         refresh();
         return true;
     }
@@ -1739,6 +2030,14 @@ bool App::handleEvent(const Event &event)
     }
     if (raw == kAltC) {
         openMenu(ActionsMenu);
+        return true;
+    }
+    if (raw == kAltH) {
+        openMenu(BrewMenu);
+        return true;
+    }
+    if (event == Event::Character('l')) {
+        toggleLeaves();
         return true;
     }
     if (raw == kAltJ) {
@@ -1806,7 +2105,7 @@ bool App::handleEvent(const Event &event)
         setTab(HelpTab);
         return true;
     }
-    for (char digit = '1'; digit <= '6'; ++digit) {
+    for (char digit = '1'; digit <= '7'; ++digit) {
         const std::string d(1, digit);
         // Os números das abas do OctoPkg; Alt+n chega como ESC n.
         if (raw != d && raw != "\x1b" + d)

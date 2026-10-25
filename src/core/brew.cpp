@@ -202,6 +202,7 @@ Package formulaFromInfo(const json::Value &f)
         p.version = available;
     }
     p.pinned = f["pinned"].toBool();
+    p.hasService = f["service"].isObject();
     if (f["outdated"].toBool())
         p.newVersion = available;
     return p;
@@ -718,7 +719,7 @@ std::vector<Package> Manager::listInstalled() const
     }
 }
 
-std::vector<Package> Manager::listRemote() const
+std::vector<Package> Manager::listRemote(std::string *warning) const
 {
     const std::string api = paths().cache + "/api";
     // brew 5+: api/internal/packages.<tag>.jws.json, um por plataforma; o mais recente vale.
@@ -762,6 +763,14 @@ std::vector<Package> Manager::listRemote() const
         } catch (const std::exception &e) {
             fail(i18n::trf("Could not read %1: %2", {f, e.what()}));
         }
+    }
+    // Os taps de terceiros não estão na API: os nomes vêm do brew tap-info.
+    try {
+        const std::vector<Package> extra = tapPackages(listTaps());
+        all.insert(all.end(), extra.begin(), extra.end());
+    } catch (const std::exception &e) {
+        if (warning)
+            *warning = e.what();
     }
     return all;
 }
@@ -1171,6 +1180,177 @@ void Manager::restore(const std::string &file, const OutputFn &out, bool interac
     if (::access(file.c_str(), R_OK) != 0)
         fail(i18n::trf("Could not read %1", {file}));
     run({"bundle", "install", "--file=" + file, "--no-upgrade"}, out, interactive);
+}
+
+// ---------------------------------------------------------------------------
+// Fase 4: serviços, taps, doctor e Brewfiles
+// ---------------------------------------------------------------------------
+
+std::vector<Service> parseServices(const std::string &text)
+{
+    std::vector<Service> out;
+    // O documento numa variável: o laço sobre o items() de um temporário ficaria pendurado.
+    const json::Value doc = json::parse(text);
+    for (const auto &v : doc.items()) {
+        Service sv;
+        sv.name = v["name"].toString();
+        sv.status = v["status"].toString("unknown");
+        sv.user = v["user"].toString();
+        sv.file = v["file"].toString();
+        sv.exitCode = v["exit_code"].isNumber() ? static_cast<int>(v["exit_code"].toInt()) : -1;
+        if (!sv.name.empty())
+            out.push_back(std::move(sv));
+    }
+    return out;
+}
+
+std::vector<Tap> parseTaps(const std::string &text)
+{
+    std::vector<Tap> out;
+    const json::Value doc = json::parse(text);
+    for (const auto &v : doc.items()) {
+        Tap t;
+        t.name = v["name"].toString();
+        t.official = v["official"].toBool();
+        // Os oficiais são sempre confiáveis; o campo só existe no brew 6+.
+        t.trusted = t.official || v["trusted"].toBool(!v.contains("trusted"));
+        t.formulae = v["formula_names"].strings();
+        t.casks = v["cask_tokens"].strings();
+        if (!t.name.empty())
+            out.push_back(std::move(t));
+    }
+    return out;
+}
+
+std::vector<Package> tapPackages(const std::vector<Tap> &taps)
+{
+    std::vector<Package> out;
+    for (const auto &t : taps) {
+        if (t.official)
+            continue;   // os oficiais já vêm da API, com versão e descrição
+        for (const Kind kind : {Kind::Formula, Kind::Cask})
+            for (const auto &full : kind == Kind::Cask ? t.casks : t.formulae) {
+                Package p;
+                p.kind = kind;
+                p.fullName = full.find('/') == std::string::npos ? t.name + "/" + full : full;
+                p.name = p.fullName.substr(p.fullName.rfind('/') + 1);
+                p.tap = t.name;
+                p.status = Status::NotInstalled;
+                out.push_back(std::move(p));
+            }
+    }
+    return out;
+}
+
+DoctorReport parseDoctor(const std::string &output)
+{
+    DoctorReport r;
+    r.output = output;
+    r.ready = output.find("Your system is ready to brew.") != std::string::npos;
+    for (const auto &l : lines(output))
+        if (l.rfind("Warning: ", 0) == 0)
+            r.warnings.push_back(trim(l.substr(9)));
+    return r;
+}
+
+std::vector<std::string> parseBundleCheck(const std::string &output)
+{
+    std::vector<std::string> out;
+    const std::string arrow = "\xE2\x86\x92 ";   // "→ "
+    const std::string tail = " needs to be installed or updated.";
+    for (const auto &l : lines(output)) {
+        if (l.rfind(arrow, 0) != 0)
+            continue;
+        std::string item = trim(l.substr(arrow.size()));
+        const size_t t = item.find(tail);
+        if (t != std::string::npos)
+            item = item.substr(0, t);
+        out.push_back(item);
+    }
+    return out;
+}
+
+bool validTapName(const std::string &name)
+{
+    const size_t slash = name.find('/');
+    if (slash == std::string::npos || slash == 0 || slash + 1 >= name.size() || name.find('/', slash + 1) != std::string::npos
+        || name[0] == '-')
+        return false;
+    for (unsigned char c : name)
+        if (!std::isalnum(c) && c != '-' && c != '_' && c != '.' && c != '/')
+            return false;
+    return true;
+}
+
+std::vector<Service> Manager::listServices() const
+{
+    return parseServices(query({"services", "list", "--json"}));
+}
+
+void Manager::service(const std::string &verb, const std::string &name, const OutputFn &out) const
+{
+    if (verb != "start" && verb != "stop" && verb != "restart")
+        fail(i18n::trf("Invalid service action: %1", {verb}));
+    if (!validPackageName(name))
+        fail(i18n::trf("Invalid package name: %1", {name}));
+    run({"services", verb, name}, out, false);
+}
+
+std::vector<Tap> Manager::listTaps() const
+{
+    return parseTaps(query({"tap-info", "--json", "--installed"}));
+}
+
+void Manager::tap(const std::string &name, bool trust, const OutputFn &out) const
+{
+    if (!validTapName(name))
+        fail(i18n::trf("Invalid tap name: %1 (use user/repo)", {name}));
+    run({"tap", name}, out, false);
+    if (trust)
+        run({"trust", "--tap", name}, out, false);
+}
+
+void Manager::untap(const std::string &name, const OutputFn &out) const
+{
+    if (!validTapName(name))
+        fail(i18n::trf("Invalid tap name: %1 (use user/repo)", {name}));
+    run({"untap", name}, out, false);
+}
+
+DoctorReport Manager::doctor() const
+{
+    const std::vector<std::string> cmd{m_brewPath, "doctor"};
+    const ProcessResult r = runProcess(cmd, kTimeoutMs, queryEnv());
+    if (!r.started)
+        fail(i18n::trf("Failed to start '%1': %2", {m_brewPath, r.startError}));
+    if (r.timedOut)
+        fail(i18n::trf("Command timed out (%1 ms): %2", {std::to_string(kTimeoutMs), "brew doctor"}));
+    // 1: há avisos; mais que isso, falhou.
+    if (r.crashed || (r.status != 0 && r.status != 1))
+        fail(trim(r.err).empty() ? i18n::trf("Command failed with exit code %1", {std::to_string(r.status)}) : trim(r.err));
+    return parseDoctor(r.out + (r.out.empty() || r.err.empty() ? "" : "\n") + r.err);
+}
+
+std::vector<std::string> Manager::bundleCheck(const std::string &file) const
+{
+    if (::access(file.c_str(), R_OK) != 0)
+        fail(i18n::trf("Could not read %1", {file}));
+    const std::vector<std::string> cmd{m_brewPath, "bundle", "check", "--file=" + file, "--verbose"};
+    const ProcessResult r = runProcess(cmd, kTimeoutMs, queryEnv());
+    if (!r.started)
+        fail(i18n::trf("Failed to start '%1': %2", {m_brewPath, r.startError}));
+    if (r.timedOut || r.crashed)
+        fail(i18n::trf("Process crashed: %1", {"brew bundle check"}));
+    // Sai com 1 quando falta algo; o que falta vem nas linhas "→".
+    std::vector<std::string> missing = parseBundleCheck(r.out + "\n" + r.err);
+    if (r.status != 0 && missing.empty()) {
+        std::string msg;
+        for (const auto &l : lines(r.err))
+            if (l.rfind("Error: ", 0) == 0)
+                msg = l.substr(7);
+        fail(msg.empty() ? i18n::trf("Command failed with exit code %1", {std::to_string(r.status)}) : msg);
+    }
+    return missing;
 }
 
 } // namespace octo

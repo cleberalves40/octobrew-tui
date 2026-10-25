@@ -397,11 +397,11 @@ TEST_CASE("repositório: lê o cache da API do brew, sem o Ruby", "[brew][api]")
         writeFile(current + ".etag", "W/\"x\"");
         writeFile(current + ".payload", "não é JSON");
         CHECK(m.listRemote().size() == 8);
-        // Só os diretórios, perguntados ao brew; o cache é lido direto.
-        CHECK(brew.calls() == std::vector<std::string>{"--cellar", "--caskroom", "--cache"});
-        // Uma segunda leitura não pergunta de novo.
+        // Os diretórios, perguntados ao brew uma vez; o cache é lido direto, e o
+        // tap-info dá os taps de terceiros (nenhum, aqui).
+        CHECK(brew.calls() == std::vector<std::string>{"--cellar", "--caskroom", "--cache", "tap-info|--json|--installed"});
         m.listRemote();
-        CHECK(brew.calls().size() == 3);
+        CHECK(brew.calls().size() == 5);
     }
     SECTION("brew 4: formula.jws.json e cask.jws.json")
     {
@@ -848,4 +848,117 @@ TEST_CASE("sem rede ou com feed inválido, fica o cache", "[news]")
     CHECK(invalid.error == "The news feed could not be read.");
     CHECK(readFile(dir.file("news.xml")) == kAtomFeed);   // o cache não foi trocado
     CHECK(contains(octo::NewsFeed(dir.file("news.xml"), "/nao/existe/curl").refresh().error, "Failed to start"));
+}
+
+// ---------------------------------------------------------------------------
+// v0.4.0: serviços, taps, doctor e Brewfiles
+// ---------------------------------------------------------------------------
+
+TEST_CASE("lê os serviços do brew services list --json", "[parse][services]")
+{
+    const auto list = octo::parseServices(kServicesJson);
+    REQUIRE(list.size() == 3);
+    CHECK(list[0].name == "foo");
+    CHECK(list[0].status == "started");
+    CHECK(list[0].user == "cleber");
+    CHECK(list[0].exitCode == 0);
+    CHECK(list[1].status == "none");
+    CHECK(list[1].user.empty());
+    CHECK(list[1].exitCode == -1);
+    CHECK(list[2].exitCode == 78);
+    CHECK(octo::parseServices("[]").empty());
+    // A fórmula que define um serviço vem marcada da lista de instalados.
+    const auto installed = octo::parseInstalled(kInstalledJson);
+    CHECK(find(installed, "f:someone/tap/foo").hasService);
+    CHECK_FALSE(find(installed, "f:curl").hasService);
+}
+
+TEST_CASE("lê os taps e os pacotes dos de terceiros", "[parse][taps]")
+{
+    const auto taps = octo::parseTaps(kTapsJson);
+    REQUIRE(taps.size() == 2);
+    CHECK(taps[0].official);
+    CHECK(taps[0].trusted);
+    CHECK_FALSE(taps[1].official);
+    CHECK_FALSE(taps[1].trusted);
+    // Só os de terceiros: os oficiais já vêm da API.
+    const auto pkgs = octo::tapPackages(taps);
+    REQUIRE(pkgs.size() == 3);
+    CHECK(pkgs[0].key() == "f:someone/tap/foo");
+    CHECK(pkgs[0].name == "foo");
+    CHECK(pkgs[0].tap == "someone/tap");
+    CHECK(pkgs[2].key() == "c:someone/tap/baz-app");
+    CHECK(pkgs[2].kind == Kind::Cask);
+    // Um brew sem o "trusted" (anterior ao 6) confia em tudo.
+    CHECK(octo::parseTaps(R"([{"name": "a/b", "official": false}])")[0].trusted);
+
+    CHECK(octo::validTapName("someone/tap"));
+    CHECK(octo::validTapName("b-ramsey/kali"));
+    CHECK_FALSE(octo::validTapName("semtap"));
+    CHECK_FALSE(octo::validTapName("a/b/c"));
+    CHECK_FALSE(octo::validTapName("-x/y"));
+    CHECK_FALSE(octo::validTapName("a/b;rm"));
+    CHECK_FALSE(octo::validTapName("https://example.com/x"));
+}
+
+TEST_CASE("visão Repositório com os pacotes dos taps de terceiros", "[brew][taps]")
+{
+    FakeBrew brew;
+    brew.writeApiCache();
+    writeFile(brew.dir.file("taps.json"), kTapsJson);
+    octo::Manager m(brew.path);
+    std::string warning;
+    const auto remote = m.listRemote(&warning);
+    CHECK(warning.empty());
+    CHECK(remote.size() == 11);   // 8 da API e 3 do someone/tap
+    // O foo instalado casa com o do tap (a mesma chave).
+    const auto merged = octo::mergeRemote(remote, octo::parseInstalled(kInstalledJson));
+    CHECK(find(merged, "f:someone/tap/foo").installed);
+    CHECK_FALSE(find(merged, "f:someone/tap/bar").installed);
+    // Se o tap-info falhar, ficam os da API, com o aviso.
+    writeFile(brew.dir.file("taps.json"), "não é JSON");
+    CHECK(m.listRemote(&warning).size() == 8);
+    CHECK(contains(warning, "JSON"));
+}
+
+TEST_CASE("lê o brew doctor e o brew bundle check", "[parse][doctor][bundle]")
+{
+    const auto d = octo::parseDoctor(kDoctorOutput);
+    CHECK_FALSE(d.ready);
+    CHECK(d.warnings == std::vector<std::string>{"Some installed casks are deprecated or disabled.",
+                                                 "Some installed kegs have no formulae!"});
+    CHECK(octo::parseDoctor("Your system is ready to brew.\n").ready);
+    CHECK(octo::parseBundleCheck(kBundleCheckOutput) == std::vector<std::string>{"Cask iterm2", "Formula figlet"});
+    CHECK(octo::parseBundleCheck("The Brewfile's dependencies are satisfied.\n").empty());
+}
+
+TEST_CASE("serviços, taps, doctor e Brewfiles pelo brew", "[brew][services][taps]")
+{
+    FakeBrew brew;
+    writeFile(brew.dir.file("services.json"), kServicesJson);
+    octo::Manager m(brew.path);
+    CHECK(m.listServices().size() == 3);
+    m.service("start", "foo");
+    m.service("restart", "postgresql@17");
+    CHECK_THROWS_WITH(m.service("kill", "foo"), ContainsSubstring("Invalid service action"));
+    CHECK_THROWS_WITH(m.service("stop", "-x"), ContainsSubstring("Invalid package name"));
+    m.tap("someone/tap", true);
+    m.tap("other/tap", false);
+    m.untap("someone/tap");
+    CHECK_THROWS_WITH(m.tap("https://evil/x", false), ContainsSubstring("Invalid tap name"));
+    CHECK(brew.operations() == std::vector<std::string>{"services|start|foo", "services|restart|postgresql@17",
+                                                        "tap|someone/tap", "trust|--tap|someone/tap", "tap|other/tap",
+                                                        "untap|someone/tap"});
+
+    // doctor: sem avisos, ou com eles (sai com 1, o que não é falha).
+    CHECK(m.doctor().ready);
+    writeFile(brew.dir.file("doctor.txt"), kDoctorOutput);
+    CHECK(m.doctor().warnings.size() == 2);
+
+    writeFile(brew.dir.file("x.Brewfile"), "brew \"curl\"\n");
+    CHECK(m.bundleCheck(brew.dir.file("x.Brewfile")).empty());
+    writeFile(brew.dir.file("bundle-check.txt"), kBundleCheckOutput);
+    CHECK(m.bundleCheck(brew.dir.file("x.Brewfile")).size() == 2);
+    CHECK_THROWS_WITH(m.bundleCheck(brew.dir.file("nao-existe")), ContainsSubstring("Could not read"));
+    CHECK(brew.calls().back() == "bundle|check|--file=" + brew.dir.file("x.Brewfile") + "|--verbose");
 }

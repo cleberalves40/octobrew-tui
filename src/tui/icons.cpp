@@ -22,6 +22,7 @@ const IconSet kNerd = {
     "",   // terminal
     "",   // newspaper_o
     "",   // question_circle
+    "",   // cogs (serviços)
     "",   // filter
     "",   // sort_asc
     "",   // sort_desc
@@ -29,9 +30,9 @@ const IconSet kNerd = {
     "",   // exclamation_triangle
 };
 
-const IconSet kUnicode = {"●", "◉", "↑", "↓", "▪", "○", "⊕", "⊖", "▣", "☁", "ℹ", "▤", "☰", "»", "✉", "?", "⌕", "▲", "▼", "…", "!"};
+const IconSet kUnicode = {"●", "◉", "↑", "↓", "▪", "○", "⊕", "⊖", "▣", "☁", "ℹ", "▤", "☰", "»", "✉", "?", "⚙", "⌕", "▲", "▼", "…", "!"};
 
-const IconSet kAscii = {"I", "d", "U", "N", "P", "-", "+", "x", "#", "@", "i", "f", "a", ">", "n", "?", "/", "^", "v", "*", "!"};
+const IconSet kAscii = {"I", "d", "U", "N", "P", "-", "+", "x", "#", "@", "i", "f", "a", ">", "n", "?", "s", "/", "^", "v", "*", "!"};
 
 } // namespace
 

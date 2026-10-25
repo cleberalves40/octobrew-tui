@@ -164,24 +164,37 @@ Element table(const ViewState &s, HitBoxes *boxes)
     return vbox({header(s, boxes), sepLight(), vbox(std::move(lines)) | flex | yframe});
 }
 
+size_t columns(const std::string &s);
+
 Element tabs(const ViewState &s, HitBoxes *boxes)
 {
     const IconSet &ic = icons(s.iconMode);
-    std::string files = std::string(ic.files) + " " + i18n::tr("Files");
+    std::string files = i18n::tr("Files");
     if (s.detailsReady && s.details.installed && !s.details.filesTruncated)
         files += " (" + std::to_string(s.details.files.size()) + ")";
-    std::string actions = std::string(ic.actions) + " " + i18n::tr("Actions");
+    std::string actions = i18n::tr("Actions");
     const size_t marked = s.toInstall.size() + s.toRemove.size();
     if (marked)
         actions += " (" + std::to_string(marked) + ")";
-    const std::string labels[TabCount] = {
-        std::string(ic.info) + " " + i18n::tr("Info"),
+    const std::string names[TabCount] = {
+        i18n::tr("Info"),
         files,
         actions,
-        std::string(ic.output) + " " + i18n::tr("Output"),
-        std::string(ic.news) + " " + i18n::tr("News") + (s.newsUnseen ? " *" : ""),
-        std::string(ic.help) + " " + i18n::tr("Help"),
+        i18n::tr("Output"),
+        i18n::tr("News") + (s.newsUnseen ? " *" : ""),
+        i18n::tr("Help"),
+        i18n::tr("Services"),
     };
+    const char *iconOf[TabCount] = {ic.info, ic.files, ic.actions, ic.output, ic.news, ic.help, ic.services};
+    // Com as sete abas, a barra passa das 80 colunas: num terminal estreito,
+    // os ícones saem e ficam os números e os nomes.
+    size_t width = 0;
+    for (int t = 0; t < TabCount; ++t)
+        width += 8 + columns(names[t]);   // " 1 X nome " e o espaço entre as abas
+    const bool withIcons = width <= static_cast<size_t>(s.contentWidth + 9);
+    std::string labels[TabCount];
+    for (int t = 0; t < TabCount; ++t)
+        labels[t] = withIcons ? std::string(iconOf[t]) + " " + names[t] : names[t];
     Elements items;
     for (int t = 0; t < TabCount; ++t) {
         Element e = text(std::string(" ") + tabKey(t) + " " + labels[t] + " ");
@@ -223,6 +236,14 @@ Elements infoLines(const ViewState &s)
     out.push_back(hbox({text(i18n::tr("Status") + ":") | bold | size(WIDTH, EQUAL, kLabelWidth),
                         text(statusText(p)) | color(stateColor(p))}));
     out.push_back(field(i18n::tr("Type"), kindText(p.kind)));
+    // O serviço vem da aba Serviços, não dos detalhes: aparece logo.
+    if (p.hasService) {
+        std::string status = i18n::tr("yes (tab 7)");
+        for (const auto &sv : s.services)
+            if (sv.name == p.name)
+                status = serviceStatusText(sv.status) + (sv.user.empty() ? std::string() : " (" + sv.user + ")");
+        out.push_back(field(i18n::tr("Service"), status));
+    }
     if (!s.detailsError.empty()) {
         out.push_back(text(i18n::trf("ERROR: %1", {s.detailsError})) | color(T().red));
         return out;
@@ -301,6 +322,7 @@ std::vector<std::pair<std::string, std::string>> helpEntries()
         {"Ctrl+L  /", i18n::tr("Find a package in the package list")},
         {"F7  Alt+D", i18n::tr("Search by name or by description")},
         {"F8  t", i18n::tr("Filter by tap (homebrew/core, homebrew/cask...)")},
+        {"l", i18n::tr("Only leaves: installed formulae that nothing else needs (brew leaves)")},
         {"Esc  Enter  Ctrl+P", i18n::tr("Go back to the package list")},
         {"i  Alt+I", i18n::tr("Switch between installed and repository packages")},
         {"+  Insert", i18n::tr("Mark the selected package for installation")},
@@ -313,9 +335,9 @@ std::vector<std::pair<std::string, std::string>> helpEntries()
         {"Ctrl+G", i18n::tr("Get the latest Homebrew news (News tab)")},
         {"Alt+,", i18n::tr("Preferences: theme, language and icons")},
         {"Alt+T", i18n::tr("Next theme")},
-        {"F9  Alt+A Alt+B Alt+C Alt+J", i18n::tr("Menus File, Search, Actions and Help")},
+        {"F9  Alt+A Alt+B Alt+C Alt+H Alt+J", i18n::tr("Menus File, Search, Actions, Homebrew and Help")},
         {"F6  s", i18n::tr("Choose the sort column (again: reverse; (brew order): original order)")},
-        {"1-6  Alt+1…Alt+6", i18n::tr("Tabs Info, Files, Actions, Output, News and Help")},
+        {"1-7  Alt+1…Alt+7", i18n::tr("Tabs Info, Files, Actions, Output, News, Help and Services")},
         {"F1  ?", i18n::tr("Show this help page")},
         {"Enter", i18n::tr("Show the Info tab of the selected package")},
         {"Tab", i18n::tr("Scroll the tab with the arrow keys")},
@@ -408,6 +430,62 @@ Elements newsLines(const ViewState &s)
     return out;
 }
 
+// Aba Serviços: uma linha por serviço, o mesmo texto para o desenho e a busca.
+constexpr size_t kServiceName = 24;
+constexpr size_t kServiceStatus = 12;
+constexpr size_t kServiceUser = 12;
+
+std::string pad(const std::string &s, size_t width)
+{
+    size_t cols = 0;
+    for (unsigned char c : s)
+        if ((c & 0xC0) != 0x80)
+            ++cols;
+    return cols >= width ? s + " " : s + std::string(width - cols, ' ');
+}
+
+std::vector<std::string> serviceEntries(const ViewState &s)
+{
+    std::vector<std::string> out;
+    if (s.servicesLoading && !s.servicesLoaded)
+        out.push_back(i18n::tr("Loading…"));
+    if (!s.servicesError.empty())
+        out.push_back(i18n::trf("ERROR: %1", {s.servicesError}));
+    if (s.servicesLoaded && s.services.empty())
+        out.push_back(i18n::tr("No installed formula has a service."));
+    for (const auto &sv : s.services)
+        out.push_back(pad(sv.name, kServiceName) + pad(serviceStatusText(sv.status), kServiceStatus)
+                      + pad(sv.user, kServiceUser)
+                      + (sv.exitCode > 0 ? i18n::trf("(exit code %1)", {std::to_string(sv.exitCode)}) + "  " : std::string())
+                      + sv.file);
+    return out;
+}
+
+Elements servicesLines(const ViewState &s)
+{
+    Elements out;
+    const std::vector<std::string> entries = serviceEntries(s);
+    const size_t first = entries.size() - s.services.size();
+    for (size_t i = 0; i < entries.size(); ++i) {
+        if (i < first) {
+            out.push_back(text(entries[i]) | (s.servicesError.empty() ? faint() : color(T().red)));
+            continue;
+        }
+        const std::string &status = s.services[i - first].status;
+        Color c = T().foreground;
+        if (status == "started" || status == "scheduled")
+            c = T().green;
+        else if (status == "error")
+            c = T().red;
+        Element e = text(entries[i]) | color(c);
+        out.push_back(status == "none" || status == "stopped" ? e | faint() : e);
+    }
+    if (!s.services.empty())
+        out.push_back(text(i18n::tr("Homebrew menu (Alt+H): start, stop or restart the service of the selected formula."))
+                      | faint());
+    return out;
+}
+
 Elements outputLines(const ViewState &s)
 {
     Elements out;
@@ -425,6 +503,7 @@ Element tabContent(const ViewState &s, HitBoxes *boxes)
     case OutputTab: lines = outputLines(s); break;
     case NewsTab:   lines = newsLines(s); break;
     case HelpTab:   lines = helpLines(); break;
+    case ServicesTab: lines = servicesLines(s); break;
     default:        lines = infoLines(s); break;
     }
     // Ctrl+F: as linhas com o texto ficam destacadas; a do resultado atual, mais.
@@ -720,6 +799,9 @@ std::vector<std::string> tabText(const ViewState &s)
         for (const auto &e : newsEntries(s))
             out.push_back(e.second);
         break;
+    case ServicesTab:
+        out = serviceEntries(s);
+        break;
     case HelpTab:
         for (const auto &e : helpEntries())
             out.push_back(e.first.empty() ? e.second : e.first + "  " + e.second);
@@ -749,7 +831,7 @@ std::vector<int> findLines(const std::vector<std::string> &lines, const std::str
 
 char tabKey(int tab)
 {
-    static const char keys[TabCount] = {'1', '2', '3', '4', '5', '6'};
+    static const char keys[TabCount] = {'1', '2', '3', '4', '5', '6', '7'};
     return tab >= 0 && tab < TabCount ? keys[tab] : '?';
 }
 
@@ -771,6 +853,21 @@ std::string keyLabel(const std::string &key)
     if (key.rfind("c:", 0) == 0)
         return key.substr(2) + " (cask)";
     return key.rfind("f:", 0) == 0 ? key.substr(2) : key;
+}
+
+std::string serviceStatusText(const std::string &status)
+{
+    if (status == "started")
+        return i18n::tr("Started");
+    if (status == "stopped")
+        return i18n::tr("Stopped");
+    if (status == "scheduled")
+        return i18n::tr("Scheduled");
+    if (status == "error")
+        return i18n::tr("Error");
+    if (status == "none")
+        return i18n::tr("Not running");
+    return status;
 }
 
 std::string kindText(octo::Kind kind)
@@ -803,7 +900,8 @@ Element render(const ViewState &s, Element filter, HitBoxes *boxes)
     const std::string view = s.remoteView ? std::string(ic.remoteView) + " " + i18n::tr("Repository")
                                           : std::string(ic.installedView) + " " + i18n::tr("Installed packages");
     Elements body;
-    body.push_back(hbox({text(" OctoBrew — Homebrew ") | bold, text("[" + view + (s.category.empty() ? std::string() : " · " + s.category) + "]") | color(T().cyan), filler(),
+    body.push_back(hbox({text(" OctoBrew — Homebrew ") | bold, text("[" + view + (s.category.empty() ? std::string() : " · " + s.category)
+                   + (s.leavesOnly ? " · " + i18n::tr("leaves") : std::string()) + "]") | color(T().cyan), filler(),
               text(std::string(ic.filter) + " "),
               s.searchMode == model::SearchMode::Description ? text(i18n::tr("Description") + ": ") | faint()
                                                              : text(""),

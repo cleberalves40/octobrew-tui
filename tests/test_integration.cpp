@@ -10,6 +10,7 @@
 #include "news.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <cstdio>
 #include <cstdlib>
 #include <stdexcept>
 #include <unistd.h>
@@ -184,4 +185,26 @@ TEST_CASE("baixa o feed do blog do Homebrew com o curl", "[integration][news]")
     REQUIRE_FALSE(r.items.empty());
     CHECK(r.items.front().link.rfind("https://brew.sh/", 0) == 0);
     CHECK(r.items.front().date.size() == 10);   // AAAA-MM-DD
+}
+
+// --- v0.4.0: serviços, taps, doctor e Brewfiles (só leitura) ---
+
+TEST_CASE("serviços, taps, doctor e bundle check do brew real", "[integration][services][taps]")
+{
+    REQUIRE_BREW();
+    CHECK_NOTHROW(mgr().listServices());
+    const auto taps = mgr().listTaps();
+    bool core = false;
+    for (const auto &t : taps)
+        core = core || (t.name == "homebrew/core" && t.official && t.trusted);
+    CHECK(core);
+    const octo::DoctorReport d = mgr().doctor();
+    CHECK(d.ready == d.warnings.empty());
+    // Um Brewfile com o ftxui, que os testes usam: nada falta.
+    char tmpl[] = "/tmp/octobrew-bundle.XXXXXX";
+    const std::string dir = ::mkdtemp(tmpl);
+    { std::FILE *f = std::fopen((dir + "/Brewfile").c_str(), "w"); std::fputs("brew \"ftxui\"\n", f); std::fclose(f); }
+    const auto missing = mgr().bundleCheck(dir + "/Brewfile");
+    (void)std::system(("rm -rf '" + dir + "'").c_str());
+    CHECK(missing.empty());
 }

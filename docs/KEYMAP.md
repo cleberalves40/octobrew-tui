@@ -45,6 +45,9 @@ Como no octopkg-tui: o terminal envia <kbd>Ctrl+I</kbd> como <kbd>Tab</kbd> e
 | Restaurar um snapshot | — (Boot Environments) | menu Arquivo | — | v0.2.0 |
 | Menu Ações | barra de menus | **Alt+C** | — | v0.2.0 |
 | Aba Notícias / buscar as últimas notícias | Alt+5 / Ctrl+G | **5** ou **Alt+5** / **Ctrl+G** | — | v0.3.0 |
+| Aba Serviços (brew services) | — | **7** ou **Alt+7** | — | v0.4.0 |
+| Só as folhas (brew leaves) | — | **l**; menu Busca | — | v0.4.0 |
+| Menu Homebrew: serviços, taps, Brewfiles, brew doctor | — | **Alt+H**, ou F9 e as setas | — | v0.4.0 |
 
 Nos diálogos: <kbd>Tab</kbd> ou as setas mudam o campo, <kbd>Espaço</kbd> marca a
 opção do snapshot, <kbd>Enter</kbd> confirma e <kbd>Esc</kbd> cancela; nas confirmações,
