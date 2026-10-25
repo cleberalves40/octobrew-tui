@@ -7,10 +7,12 @@
 // tests/macos-e2e.sh a define.
 
 #include "brew.h"
+#include "news.h"
 
 #include <catch2/catch_test_macros.hpp>
 #include <cstdlib>
 #include <stdexcept>
+#include <unistd.h>
 
 namespace {
 
@@ -165,4 +167,21 @@ TEST_CASE("instala, fixa, libera e remove o figlet", "[integration][transaction]
     for (const auto &q : mgr().listInstalled())
         still = still || q.key() == "f:figlet";
     CHECK_FALSE(still);
+}
+
+// --- v0.3.0: notícias ---
+
+TEST_CASE("baixa o feed do blog do Homebrew com o curl", "[integration][news]")
+{
+    REQUIRE_BREW();
+    char tmpl[] = "/tmp/octobrew-news.XXXXXX";
+    const std::string dir = ::mkdtemp(tmpl);
+    const octo::NewsFeed feed(dir + "/news.xml");
+    const octo::NewsResult r = feed.refresh();
+    (void)std::system(("rm -rf '" + dir + "'").c_str());
+    INFO(r.error);
+    REQUIRE(r.error.empty());
+    REQUIRE_FALSE(r.items.empty());
+    CHECK(r.items.front().link.rfind("https://brew.sh/", 0) == 0);
+    CHECK(r.items.front().date.size() == 10);   // AAAA-MM-DD
 }

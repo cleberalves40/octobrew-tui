@@ -5,6 +5,29 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 e o projeto usa [versionamento semântico](https://semver.org/lang/pt-BR/),
 com tags no formato `vX.Y.Z`.
 
+## [0.3.0] - 2026-10-25
+
+A aba Notícias (Fase 3 do [roadmap](docs/ROADMAP.md)): agora todas as abas do OctoPkg
+estão no octobrew-tui.
+
+### Adicionado
+- Aba **Notícias** (**5** ou **Alt+5**), como no OctoPkg e no octopkg-tui: as 10
+  últimas notícias do blog do Homebrew (`https://brew.sh/atom.xml`), com título, data,
+  link e o resumo. **Ctrl+G** ou Arquivo → Buscar as últimas notícias baixa de novo.
+- Leitor de **Atom** (o feed do brew.sh, do Jekyll), além do RSS 2.0 do octopkg-tui:
+  o link `alternate`, a data de `published` (`2026-09-13`), o `summary` (ou o começo do
+  `content`) como descrição, cortado em 600 caracteres, e "Homebrew 7.0.0" para os
+  posts de versão, cujo título é só o número.
+- O feed é baixado com o `/usr/bin/curl` do macOS, só por https e com o certificado
+  conferido (o OctoPkg usa `curl -k`, que não confere), e fica em
+  `~/.config/octobrew-tui/news.xml`: na primeira visita à aba, as notícias salvas
+  aparecem na hora e as novas chegam em segundo plano. Sem rede, ou com um feed que não
+  dá para ler, ficam as salvas, com o aviso. Notícias novas marcam a aba com `*`.
+- **Ctrl+F** busca também na aba Notícias.
+- Testes: o Atom do brew.sh e o RSS, o corte das descrições, o download com um curl
+  falso (argumentos, cache, mudança, falha e feed inválido), a aba dirigida por teclas
+  e, na integração, o download do feed de verdade.
+
 ## [0.2.0] - 2026-10-25
 
 Transações: marcar, instalar, remover, atualizar, limpar e fixar, como no OctoPkg
