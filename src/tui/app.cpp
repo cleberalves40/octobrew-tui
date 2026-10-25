@@ -38,6 +38,7 @@ const std::string kAltT = "\x1b" "t";
 const std::string kAltZ = "\x1b" "z";
 const std::string kAltComma = "\x1b" ",";
 const std::string kCtrlF = "\x06";
+const std::string kCtrlG = "\x07";
 const std::string kShiftF3 = "\x1b[1;2R";   // xterm; o FTXUI não tem um evento próprio
 
 enum Menus { FileMenu = 0, SearchMenu, ActionsMenu, HelpMenu };
@@ -56,6 +57,13 @@ void popUtf8(std::string &s)
         if ((c & 0xC0) != 0x80)
             break;
     }
+}
+
+// O cache das notícias fica ao lado do arquivo de preferências.
+std::string newsCachePath(const std::string &settingsPath)
+{
+    const size_t slash = settingsPath.rfind('/');
+    return (slash == std::string::npos ? std::string(".") : settingsPath.substr(0, slash)) + "/news.xml";
 }
 
 std::string join(const std::vector<std::string> &v, const std::string &sep)
@@ -109,6 +117,7 @@ App::App(const Options &options)
                                                              : options.iconMode))
     , m_remoteView(options.remote)
     , m_sudoPath(options.sudoPath.empty() ? std::string("/usr/bin/sudo") : options.sudoPath)
+    , m_newsFeed(newsCachePath(m_settings.path()), options.curlPath)
 {
     const std::string lang = options.language.empty() ? m_settings.value("language", "system")
                                                       : options.language;
@@ -135,6 +144,8 @@ App::~App()
 
 void App::joinWorkers()
 {
+    if (m_newsWorker.joinable())
+        m_newsWorker.join();
     if (m_worker.joinable())
         m_worker.join();
     if (m_detailWorker.joinable())
@@ -488,6 +499,11 @@ ViewState App::viewState()
     s.toRemove = m_toRemove;
     s.dialog = m_dialog;
     s.themeId = m_themeId;
+    s.news = m_news.items;
+    s.newsLoading = m_newsBusy;
+    s.newsFromCache = m_news.fromCache;
+    s.newsError = m_news.error;
+    s.newsUnseen = m_newsUnseen;
     s.findOpen = m_findOpen;
     s.findText = m_findText;
     if (m_findOpen && !m_findText.empty()) {
@@ -533,6 +549,11 @@ void App::scrollContent(int delta)
 void App::setTab(int tab)
 {
     m_tab = tab;
+    if (tab == NewsTab) {
+        m_newsUnseen = false;
+        if (!m_newsStarted)
+            loadNews();
+    }
     m_contentScroll = 0;
     if (tab == OutputTab && m_contentFocused)
         m_contentScroll = std::max(0, static_cast<int>(m_log.size()) - m_contentHeight);
@@ -1110,15 +1131,59 @@ void App::actPreferences()
 
 void App::openFind()
 {
-    // Como o Ctrl+F do OctoPkg: nas abas Arquivos, Saída e Ajuda.
-    if (m_tab != FilesTab && m_tab != OutputTab && m_tab != HelpTab) {
-        m_status = i18n::tr("Find works in the Files, Output and Help tabs.");
+    // Como o Ctrl+F do OctoPkg: nas abas Arquivos, Saída, Notícias e Ajuda.
+    if (m_tab != FilesTab && m_tab != OutputTab && m_tab != NewsTab && m_tab != HelpTab) {
+        m_status = i18n::tr("Find works in the Files, Output, News and Help tabs.");
         return;
     }
     m_findOpen = true;
     m_findText.clear();
     m_findIndex = 0;
     m_contentFocused = false;
+}
+
+// ---------------------------------------------------------------------------
+// Notícias (aba 5, Ctrl+G), como no OctoPkg
+// ---------------------------------------------------------------------------
+
+void App::loadNews()
+{
+    // Na primeira visita: as do cache na hora, e as novas em segundo plano.
+    m_newsStarted = true;
+    m_news = m_newsFeed.cached();
+    refreshNews();
+}
+
+void App::refreshNews()
+{
+    m_newsStarted = true;
+    if (m_newsBusy)
+        return;
+    log(i18n::trf("Searching for %1 latest news...", {octo::kNewsSource}));
+    m_newsBusy = true;
+    if (!m_screen) {   // testes
+        applyNews(m_newsFeed.refresh());
+        return;
+    }
+    if (m_newsWorker.joinable())
+        m_newsWorker.join();
+    m_newsWorker = std::thread([this] {
+        const octo::NewsResult r = m_newsFeed.refresh();
+        m_screen->Post([this, r] { applyNews(r); });
+        m_screen->PostEvent(Event::Custom);
+    });
+}
+
+void App::applyNews(const octo::NewsResult &result)
+{
+    m_newsBusy = false;
+    m_news = result;
+    if (!result.error.empty())
+        log(i18n::trf("WARNING: %1", {result.error}));
+    else
+        log(i18n::trf("%1 news: %2 item(s).", {octo::kNewsSource, std::to_string(result.items.size())}));
+    if (result.updated && m_tab != NewsTab)
+        m_newsUnseen = true;
 }
 
 void App::findStep(int delta)
@@ -1396,6 +1461,7 @@ void App::openMenu(int menu)
          {i18n::tr("Remove unneeded dependencies"), ""},
          sep,
          {i18n::tr("Restore a snapshot…"), ""},
+         {i18n::tr("Get the latest news"), "Ctrl+G"},
          sep,
          {i18n::tr("Preferences…"), "Alt+,"},
          {i18n::tr("Next theme"), "Alt+T"},
@@ -1422,7 +1488,7 @@ void App::openMenu(int menu)
     m_menuActions = {
         {[this] { refresh(); }, [this] { toggleView(); }, nullptr, [this] { actUpdate(); },
          [this] { actUpgrade(); }, [this] { actClean(); }, [this] { actAutoremove(); }, nullptr,
-         [this] { actRestore(); }, nullptr, [this] { actPreferences(); }, [this] { nextThemeKey(); }, nullptr,
+         [this] { actRestore(); }, [this] { setTab(NewsTab); refreshNews(); }, nullptr, [this] { actPreferences(); }, [this] { nextThemeKey(); }, nullptr,
          [this] { quit(); }},
         {[this] { setSearchMode(model::SearchMode::Name); },
          [this] { setSearchMode(model::SearchMode::Description); }, nullptr,
@@ -1722,6 +1788,12 @@ bool App::handleEvent(const Event &event)
         openFind();
         return true;
     }
+    if (raw == kCtrlG) {
+        setTab(NewsTab);
+        if (m_newsStarted && !m_newsBusy)
+            refreshNews();
+        return true;
+    }
     if (raw == kAltT) {
         nextThemeKey();
         return true;
@@ -1736,8 +1808,7 @@ bool App::handleEvent(const Event &event)
     }
     for (char digit = '1'; digit <= '6'; ++digit) {
         const std::string d(1, digit);
-        // Os números das abas do OctoPkg; Alt+n chega como ESC n. O 5 é o da
-        // aba Notícias, que ainda não existe.
+        // Os números das abas do OctoPkg; Alt+n chega como ESC n.
         if (raw != d && raw != "\x1b" + d)
             continue;
         for (int t = 0; t < TabCount; ++t)

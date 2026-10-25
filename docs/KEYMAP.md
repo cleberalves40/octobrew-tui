@@ -30,7 +30,7 @@ Como no octopkg-tui: o terminal envia <kbd>Ctrl+I</kbd> como <kbd>Tab</kbd> e
 | Atualizar a lista | — | **F5** | **Ctrl+R** | v0.1.0 |
 | Rolar a aba atual | — (mouse) | **Tab**, depois as setas, PgUp, PgDn | — | v0.1.0 |
 | Menus | barra de menus | **F9** ou **Alt+A** (Arquivo), **Alt+B** (Busca), **Alt+J** (Ajuda) | **Alt+A** | v0.1.0 |
-| Buscar texto nas abas Arquivos, Saída e Ajuda | Ctrl+F (F3 / Shift+F3) | **Ctrl+F**; **Enter**/**F3** e **Shift+F3** (ou ↓ ↑) | ↓ ↑ | v0.1.0 |
+| Buscar texto nas abas Arquivos, Saída, Notícias e Ajuda | Ctrl+F (F3 / Shift+F3) | **Ctrl+F**; **Enter**/**F3** e **Shift+F3** (ou ↓ ↑) | ↓ ↑ | v0.1.0 |
 | Preferências / próximo tema | — | **Alt+,** / **Alt+T** | — | v0.1.0 |
 | Sair | Ctrl+Q | **Ctrl+Q**, **F10** ou **q** | **q** | v0.1.0 |
 | Marcar para instalar / remover | + / − | **+** / **−**, ou **Insert** / **Delete** | — | v0.2.0 |
@@ -44,7 +44,7 @@ Como no octopkg-tui: o terminal envia <kbd>Ctrl+I</kbd> como <kbd>Tab</kbd> e
 | Bloquear / desbloquear | menu de contexto | menu Ações: Fixar / Liberar (`brew pin` / `unpin`) | — | v0.2.0 |
 | Restaurar um snapshot | — (Boot Environments) | menu Arquivo | — | v0.2.0 |
 | Menu Ações | barra de menus | **Alt+C** | — | v0.2.0 |
-| Aba Notícias (5) | Alt+5 | Fase 3 (a tecla fica reservada) | — | — |
+| Aba Notícias / buscar as últimas notícias | Alt+5 / Ctrl+G | **5** ou **Alt+5** / **Ctrl+G** | — | v0.3.0 |
 
 Nos diálogos: <kbd>Tab</kbd> ou as setas mudam o campo, <kbd>Espaço</kbd> marca a
 opção do snapshot, <kbd>Enter</kbd> confirma e <kbd>Esc</kbd> cancela; nas confirmações,

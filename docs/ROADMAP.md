@@ -23,7 +23,7 @@ núcleo que fala com o gerenciador de pacotes foi reescrito: `core/brew` no luga
 | `pkg clean -a` | `brew cleanup --prune=all`, com a prévia do `--dry-run`; e `brew autoremove` | 2 ✅ |
 | doas/sudo | sai: o brew roda como usuário; casks com `.pkg` pedem o `sudo` com a tela suspensa | 2 ✅ |
 | Boot Environment (`bectl`) | snapshot em Brewfile (`brew bundle dump`) antes da transação | 2 ✅ |
-| aba Notícias (feed da variante BSD) | feed do blog do Homebrew, com o `/usr/bin/curl` | 3 |
+| aba Notícias (feed da variante BSD) | feed Atom do blog do Homebrew (`brew.sh/atom.xml`), com o `/usr/bin/curl` | 3 ✅ |
 
 ## Fases
 
@@ -55,8 +55,9 @@ núcleo que fala com o gerenciador de pacotes foi reescrito: `core/brew` no luga
   autoremove virou uma ação própria). O brew 7 pergunta antes de agir (`ask`); sem um
   terminal, a pergunta é pulada, e o octobrew-tui passa `--no-ask` de qualquer forma.
 
-### Fase 3 — Notícias (v0.3.0)
+### Fase 3 — Notícias ✅ (v0.3.0)
 - Aba Notícias (5) com o feed do blog do Homebrew, cache em disco e Ctrl+G.
+- O feed é Atom (não RSS, como o dos BSDs): o octobrew-tui lê os dois.
 
 ### Fase 4 — Funções que só o Homebrew tem (v0.4.0)
 - Aba Serviços: `brew services list --json`, com iniciar, parar e reiniciar.

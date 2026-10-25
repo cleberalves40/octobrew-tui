@@ -106,6 +106,8 @@ tui::Options options(const TempDir &dir, const std::string &brew)
     o.brewPath = brew;
     // O sudo falso: "sudo -n true" passa (credenciais em cache), a menos que sudo.rc exista.
     o.sudoPath = dir.file("sudo");
+    // Sem rede nos testes: o curl é o curl.sh de cada teste (ou nenhum).
+    o.curlPath = dir.file("curl.sh");
     writeExecutable(o.sudoPath, "#!/bin/sh\n[ -f '" + dir.file("sudo.rc") + "' ] && exit 1\nexit 0\n");
     o.iconMode = "ascii";
     o.language = "en_US";
@@ -174,10 +176,8 @@ TEST_CASE("tela mostra colunas, linhas e estado", "[view]")
     for (const char *t : {"OctoBrew — Homebrew", "[# Installed packages]", "Name ^", "Type", "Version", "Size",
                           "Installed on", "curl", "brotli", "alacritty", "Formula", "Cask", "4.00 MiB", "25.00 MiB",
                           "Ready.", "4 package(s)", "2 outdated", "1 i Info", "2 f Files", "3 a Actions",
-                          "4 > Output", "6 ? Help", "F1", "F5", "F8", "F9", "F10", "+/-", "M-m"})
+                          "4 > Output", "5 n News", "6 ? Help", "F1", "F5", "F8", "F9", "F10", "+/-", "M-m"})
         CHECK_INFO(out, t);
-    // A aba Notícias (5) é da Fase 3.
-    CHECK_FALSE(has(out, "5 n News"));
     // Ordem pelo nome; brotli é dependência ("d"), curl desatualizado ("U"), wget fixado ("P").
     CHECK(out.find("alacritty") < out.find("brotli"));
     CHECK(has(out, " d brotli"));
@@ -405,9 +405,8 @@ TEST_CASE("atalhos de busca, abas e foco", "[app]")
     CHECK(f.app.viewState().tab == tui::HelpTab);
     f.app.handleEvent(Event::Character('3'));                  // Ações
     CHECK(f.app.viewState().tab == tui::ActionsTab);
-    // 5 é da aba Notícias, que ainda não existe: nada muda.
-    f.app.handleEvent(Event::Special("\x1b" "5"));
-    CHECK(f.app.viewState().tab == tui::ActionsTab);
+    f.app.handleEvent(Event::Special("\x1b" "5"));             // Notícias
+    CHECK(f.app.viewState().tab == tui::NewsTab);
     f.app.handleEvent(Event::Return);                          // Enter: aba Informação
     CHECK(f.app.viewState().tab == tui::InfoTab);
     f.app.handleEvent(Event::F1);
@@ -673,7 +672,7 @@ TEST_CASE("Ctrl+F busca nas abas Arquivos, Saída e Ajuda", "[app][find]")
     // Na aba Informação, não há onde buscar.
     f.app.handleEvent(Event::Special("\x06"));
     CHECK_FALSE(f.app.viewState().findOpen);
-    CHECK(f.app.viewState().status == "Find works in the Files, Output and Help tabs.");
+    CHECK(f.app.viewState().status == "Find works in the Files, Output, News and Help tabs.");
 
     f.app.handleEvent(Event::Character('2'));
     f.app.handleEvent(Event::Special("\x06"));
@@ -1158,4 +1157,73 @@ TEST_CASE("diálogo da transação em português", "[view][actions]")
                           "[ OK ]", "[ Cancelar ]", "Marcar", "Aplicar"})
         CHECK_INFO(out, t);
     i18n::setLocale("en_US");
+}
+
+// --- v0.3.0: aba Notícias ---
+
+TEST_CASE("aba Notícias: cache na hora, Ctrl+G baixa de novo, e a busca funciona", "[app][news]")
+{
+    i18n::setLocale("en_US");
+    AppFixture f;
+    writeFile(f.dir.file("feed.xml"), kAtomFeed);
+    writeExecutable(f.dir.file("curl.sh"), "#!/bin/sh\necho \"$*\" >> '" + f.dir.file("curl.log") + "'\n"
+                                           "while [ $# -gt 1 ]; do [ \"$1\" = -o ] && out=$2; shift; done\n"
+                                           "cp '" + f.dir.file("feed.xml") + "' \"$out\"\n");
+    f.app.handleEvent(Event::Character('5'));
+    tui::ViewState s = f.app.viewState();
+    CHECK(s.tab == tui::NewsTab);
+    REQUIRE(s.news.size() == 2);   // sem tela, o download roda na hora
+    CHECK(readLines(f.dir.file("curl.log")).size() == 1);
+    const std::string out = draw(s);
+    for (const char *t : {"Homebrew news", "Homebrew 7.0.0  —  2026-09-13", "https://brew.sh/2026/09/13/homebrew-7.0.0/",
+                          "proud to announce Homebrew 7.0.0", "new git signing key  —  2025-01-01"})
+        CHECK_INFO(out, t);
+    // A descrição é quebrada na largura da aba.
+    s.contentWidth = 40;
+    for (const auto &l : tui::tabText(s))
+        if (l.rfind("https://", 0) != 0 && l.find("  —  ") == std::string::npos)
+            CHECK(l.size() <= 42);
+
+    // Voltar à aba não baixa de novo; Ctrl+G, sim.
+    f.app.handleEvent(Event::Character('1'));
+    f.app.handleEvent(Event::Character('5'));
+    CHECK(readLines(f.dir.file("curl.log")).size() == 1);
+    f.app.handleEvent(Event::Special("\x07"));   // Ctrl+G
+    CHECK(readLines(f.dir.file("curl.log")).size() == 2);
+
+    f.app.handleEvent(Event::Special("\x06"));   // Ctrl+F
+    for (char c : std::string("sandboxing"))
+        f.app.handleEvent(Event::Character(c));
+    CHECK(f.app.viewState().findCount == 1);
+    f.app.handleEvent(Event::Escape);
+    // O cache ficou ao lado das preferências.
+    CHECK(has(readFile(f.dir.file("news.xml")), "homebrew-7.0.0"));
+}
+
+TEST_CASE("aba Notícias sem rede mostra o aviso; o menu Arquivo busca de novo", "[app][news]")
+{
+    i18n::setLocale("en_US");
+    AppFixture f;   // curl.sh não existe: sem rede
+    f.app.handleEvent(Event::Special("\x1b" "5"));
+    tui::ViewState s = f.app.viewState();
+    CHECK(s.news.empty());
+    CHECK_FALSE(s.newsError.empty());
+    std::string out = draw(s);
+    CHECK(has(out, "WARNING: Failed to start"));
+    CHECK(has(out, "No news yet. Ctrl+G gets the latest news."));
+
+    // Pelo menu Arquivo, de outra aba: o menu leva à aba e baixa o feed.
+    writeFile(f.dir.file("feed.xml"), kAtomFeed);
+    writeExecutable(f.dir.file("curl.sh"), "#!/bin/sh\nwhile [ $# -gt 1 ]; do [ \"$1\" = -o ] && out=$2; shift; done\n"
+                                           "cp '" + f.dir.file("feed.xml") + "' \"$out\"\n");
+    f.app.handleEvent(Event::Character('1'));
+    f.app.handleEvent(Event::F9);
+    for (int i = 0; i < 7; ++i)   // … Restaurar um snapshot, Buscar as últimas notícias
+        f.app.handleEvent(Event::ArrowDown);
+    CHECK(has(draw(f.app.viewState()), "Get the latest news"));
+    f.app.handleEvent(Event::Return);
+    s = f.app.viewState();
+    CHECK(s.tab == tui::NewsTab);   // o menu leva à aba
+    CHECK(s.news.size() == 2);
+    CHECK(s.newsError.empty());
 }

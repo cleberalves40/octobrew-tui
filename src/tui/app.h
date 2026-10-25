@@ -4,6 +4,7 @@
 #include "brew.h"
 #include "icons.h"
 #include "listmodel.h"
+#include "news.h"
 #include "settings.h"
 #include "view.h"
 
@@ -30,6 +31,7 @@ struct Options {
     bool remote = false;         // começa na visão Repositório
     std::string theme;           // vazio: preferência salva ou "system"
     std::string sudoPath;        // vazio: /usr/bin/sudo (só o "sudo -n true", para saber se pede senha)
+    std::string curlPath;        // vazio: /usr/bin/curl, para o feed de notícias
 };
 
 /** Resultado de uma listagem, aplicado na thread da interface. */
@@ -121,6 +123,9 @@ private:
     bool handleCategoryEvent(const ftxui::Event &event);
     std::string filterPlaceholder() const;
     void openFind();
+    void loadNews();
+    void refreshNews();
+    void applyNews(const octo::NewsResult &result);
     void findStep(int delta);
     bool handleFindEvent(const ftxui::Event &event);
     void openMenu(int menu);
@@ -201,6 +206,13 @@ private:
     std::string m_operationError;              // fica no status até a próxima ação
     bool m_inOperation = false;                // uma operação do brew: não dá para sair
     std::string m_sudoPath;
+
+    octo::NewsFeed m_newsFeed;
+    octo::NewsResult m_news;
+    bool m_newsStarted = false;                // a aba já foi aberta
+    bool m_newsUnseen = false;
+    std::atomic<bool> m_newsBusy{false};
+    std::thread m_newsWorker;
 
     Dialog m_dialog;
     Op m_onAccept;                             // Confirm

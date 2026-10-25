@@ -179,6 +179,24 @@ const char kPkgCaskInfo[] = R"json({"formulae": [], "casks": [
    "artifacts": [{"app": ["kitty.app"]}, {"zap": [{"launchctl": "x", "trash": ["~/.config/kitty"]}]}]}
 ]})json";
 
+// Trecho do https://brew.sh/atom.xml (Jekyll): título "html", link alternate,
+// summary em HTML escapado e content em CDATA.
+const char kAtomFeed[] =
+    "<?xml version=\"1.0\" encoding=\"utf-8\"?><feed xmlns=\"http://www.w3.org/2005/Atom\" >"
+    "<link href=\"https://brew.sh/atom.xml\" rel=\"self\" type=\"application/atom+xml\" />"
+    "<title type=\"html\">Homebrew</title>"
+    "<entry><title type=\"html\">7.0.0</title>"
+    "<link href=\"https://brew.sh/2026/09/13/homebrew-7.0.0/\" rel=\"alternate\" type=\"text/html\" title=\"7.0.0\" />"
+    "<published>2026-09-13T00:00:00+00:00</published><updated>2026-09-13T00:00:00+00:00</updated>"
+    "<content type=\"html\"><![CDATA[<p>Long post &amp; more.</p>]]></content>"
+    "<summary type=\"html\">&lt;p&gt;Today, I&#8217;m proud to announce Homebrew 7.0.0. Faster installations, "
+    "stronger sandboxing and a native macOS app.&lt;/p&gt;</summary></entry>"
+    "<entry><title type=\"html\">Homebrew&#8217;s new git signing key</title>"
+    "<link href=\"https://brew.sh/2025/01/01/key/\" rel=\"alternate\" type=\"text/html\" />"
+    "<published>2025-01-01T10:00:00+00:00</published>"
+    "<content type=\"html\"><![CDATA[<p>We rotated the key.</p><p>Second paragraph.</p>]]></content></entry>"
+    "</feed>";
+
 // Uma string JSON com o texto (para montar o envelope JWS).
 inline std::string quoted(const std::string &s)
 {

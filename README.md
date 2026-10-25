@@ -18,7 +18,7 @@ FreeBSD: as mesmas abas, os mesmos atalhos, os mesmos temas e ícones
  U curl                         Formula  8.9.1              4.72 MiB  2026-10-19 09:12
  P wget                         Formula  1.24.5             4.01 MiB  2026-09-02 15:40
 ────────────────────────────────────────────────────────────────────────────────────
- 1 i Info   2 f Files   3 a Actions   4 > Output   6 ? Help
+ 1 i Info   2 f Files   3 a Actions   4 > Output   5 n News   6 ? Help
 curl  Get a file from an HTTP, HTTPS or FTP server
 Status:             Outdated (version 8.10.0 is available)
 Type:               Formula
@@ -36,7 +36,8 @@ para instalar e **x** para remover.)
 
 ## Estado
 
-**v0.2.0** (as Fases 1 e 2 do [roadmap](docs/ROADMAP.md)). O programa:
+**v0.3.0** (as Fases 1, 2 e 3 do [roadmap](docs/ROADMAP.md)): todas as abas do OctoPkg.
+O programa:
 
 - marca pacotes para instalar (**+**) e remover (**-**), mostra a prévia da transação e
   a executa (**Alt+M**), com um snapshot em Brewfile antes;
@@ -47,9 +48,11 @@ para instalar e **x** para remover.)
 - mostra os arquivos de cada instalado e o espaço que ele ocupa em disco;
 - busca por nome ou por descrição (**F7**) e filtra por tap (**F8**);
 - ordena por qualquer coluna (**F6**) e maximiza a lista ou as abas (**F11**);
-- tem os 15 temas e as Preferências do octopkg-tui.
+- tem os 15 temas e as Preferências do octopkg-tui;
+- mostra as notícias do blog do Homebrew (aba **5**, **Ctrl+G**).
 
-A aba Notícias é a Fase 3. Veja o [CHANGELOG](CHANGELOG.md).
+A próxima fase traz o que só o Homebrew tem: serviços, taps e Brewfiles. Veja o
+[CHANGELOG](CHANGELOG.md).
 
 ## Requisitos
 
@@ -83,6 +86,7 @@ o modo de busca, o tema, o idioma e os ícones (pelo diálogo de Preferências, 
 |:---|:---|:---|
 | Instalados (fórmulas e casks, com desatualizados, pins e dependências) | `brew info --json=v2 --installed`, uma chamada | ~2 s (o Ruby do brew) |
 | Repositório (~16 mil fórmulas e casks) | o cache da API do Homebrew, lido direto (`$(brew --cache)/api/internal/packages.*.jws.json`; no brew 4, `formula.jws.json` e `cask.jws.json`), sem rede e sem Ruby | ~0,3 s |
+| Notícias (aba 5) | `https://brew.sh/atom.xml`, com o `/usr/bin/curl` (só https, certificado conferido), em cache em `~/.config/octobrew-tui/news.xml` | na primeira visita e no Ctrl+G, em segundo plano |
 | Detalhes do selecionado | `brew info --json=v2 --formula\|--cask NOME` | ~0,5–1 s, em segundo plano e em cache |
 | Arquivos (aba 2) | `brew list --formula --verbose` / `brew list --cask` | idem |
 | Tamanho em disco | o Cellar (todas as versões) e o Caskroom, mais o aplicativo em `/Applications`, medidos pelo próprio programa | segundo plano, depois da lista |
@@ -147,11 +151,12 @@ então cada uma tem uma alternativa:
 | <kbd>Ctrl+U</kbd> / <kbd>Ctrl+K</kbd> | Instalar as atualizações / atualizar o Homebrew |
 | <kbd>F6</kbd> / <kbd>s</kbd> | Escolher a coluna de ordenação (de novo na mesma coluna inverte) |
 | Clique no cabeçalho | Ordenar: crescente, decrescente, ordem do brew |
-| <kbd>1</kbd>…<kbd>4</kbd> <kbd>6</kbd> / <kbd>Alt+1</kbd>… | Abas Informação, Arquivos, Ações, Saída e Ajuda, com os números do OctoPkg |
+| <kbd>1</kbd>…<kbd>6</kbd> / <kbd>Alt+1</kbd>…<kbd>Alt+6</kbd> | Abas Informação, Arquivos, Ações, Saída, Notícias e Ajuda, com os números do OctoPkg |
+| <kbd>Ctrl+G</kbd> | Buscar as últimas notícias do Homebrew (aba Notícias) |
 | <kbd>F1</kbd> / <kbd>?</kbd> | Ajuda |
 | <kbd>Enter</kbd> | Aba Informação do pacote selecionado |
 | <kbd>Tab</kbd> | Rolar a aba com as setas (de novo, ou <kbd>Esc</kbd>, volta à lista) |
-| <kbd>Ctrl+F</kbd> | Buscar texto nas abas Arquivos, Saída e Ajuda (<kbd>F3</kbd> / <kbd>Shift+F3</kbd>) |
+| <kbd>Ctrl+F</kbd> | Buscar texto nas abas Arquivos, Saída, Notícias e Ajuda (<kbd>F3</kbd> / <kbd>Shift+F3</kbd>) |
 | <kbd>F9</kbd> / <kbd>Alt+A</kbd> <kbd>Alt+B</kbd> <kbd>Alt+C</kbd> <kbd>Alt+J</kbd> | Menus Arquivo, Busca, Ações e Ajuda |
 | <kbd>Alt+,</kbd> / <kbd>Alt+T</kbd> | Preferências (tema, idioma, ícones) / próximo tema |
 | <kbd>F11</kbd> / <kbd>Alt+Z</kbd> | Maximizar a lista, depois as abas, depois voltar às duas |
@@ -164,7 +169,7 @@ iTerm2: *Left Option key: Esc+*). O mapa completo está em [docs/KEYMAP.md](docs
 
 | Camada | Local | Responsabilidade |
 |:---|:---|:---|
-| Núcleo | `src/core/` | `brew.*`: o brew sem shell, a leitura do JSON dele, do cache da API e das prévias (`--dry-run`), estados, dependentes, as operações e os snapshots, e os tamanhos em disco. `json.*`: um leitor de JSON próprio. `process`, `i18n` e `settings` vêm do octopkg-tui sem mudança. C++17 puro, sem dependências. |
+| Núcleo | `src/core/` | `brew.*`: o brew sem shell, a leitura do JSON dele, do cache da API e das prévias (`--dry-run`), estados, dependentes, as operações e os snapshots, e os tamanhos em disco. `json.*`: um leitor de JSON próprio. `news.*`: o feed Atom/RSS e o cache das notícias. `process`, `i18n` e `settings` vêm do octopkg-tui sem mudança. C++17 puro, sem dependências. |
 | Modelo | `src/model/` | Filtro, ordenação (versão, tipo, tamanho, data, estado), filtro por tap e a seleção que acompanha o pacote (pela chave `f:nome` / `c:token`) |
 | Interface | `src/tui/` | FTXUI: tela, temas, teclado, mouse, diálogos, menus e busca nas abas, do octopkg-tui; listagem, detalhes e tamanhos em segundo plano |
 
@@ -184,7 +189,8 @@ sh tests/tui-smoke.sh build    # a interface num pseudo-terminal, com um brew fa
 - `test_view`: desenha a tela em texto e dirige a interface com eventos de teclado,
   inclusive o caminho completo (listagem, repositório, detalhes e tamanhos) com o brew
   falso.
-- `test_integration`: contra o Homebrew real: as consultas e as prévias, sem mudar nada;
+- `test_integration`: contra o Homebrew real: as consultas, as prévias e o feed de
+  notícias, sem mudar nada;
   com `OCTOBREW_TEST_TRANSACTIONS=1`, instala, fixa e remove o figlet (se ele não estiver
   instalado).
 - `tests/tui-smoke.sh`: a interface num pseudo-terminal com um brew falso; roda também no
