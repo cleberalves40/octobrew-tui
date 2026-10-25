@@ -1,8 +1,8 @@
 class OctobrewTui < Formula
   desc "Terminal UI for Homebrew with the tabs, keys and themes of OctoPkg"
   homepage "https://github.com/cleberalves40/octobrew-tui"
-  url "https://github.com/cleberalves40/octobrew-tui/archive/refs/tags/v1.0.0.tar.gz"
-  sha256 "0bfefdbef4fe33c7a9590d86c294b1bbb940e210aee1d02a858f3b2d68d1be36"
+  url "https://github.com/cleberalves40/octobrew-tui/archive/refs/tags/v1.0.1.tar.gz"
+  sha256 "549d7ee095571be91dfa71ada356e473747c620a16aee1c768acde4bd19267a8"
   license "GPL-2.0-or-later"
   head "https://github.com/cleberalves40/octobrew-tui.git", branch: "main"
 
