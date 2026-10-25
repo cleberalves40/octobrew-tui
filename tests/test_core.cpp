@@ -761,3 +761,91 @@ TEST_CASE("casks que pedem o sudo, pelo brew info", "[brew][transaction]")
     CHECK(m.casksNeedingSudo({}).empty());
     CHECK(brew.calls() == std::vector<std::string>{"info|--json=v2|--cask|zoom"});
 }
+
+// ---------------------------------------------------------------------------
+// v0.3.0: notícias
+// ---------------------------------------------------------------------------
+
+#include "news.h"
+
+namespace {
+
+// curl falso: grava em -o o arquivo de origem e registra os argumentos.
+std::string fakeCurl(const TempDir &dir, const std::string &source, int status = 0)
+{
+    const std::string path = dir.file("curl-" + std::to_string(status));
+    writeExecutable(path, "#!/bin/sh\n( IFS='|'; echo \"$*\" ) >> '" + dir.file("curl.log") + "'\n"
+                          "while [ $# -gt 1 ]; do [ \"$1\" = -o ] && out=$2; shift; done\n"
+                          "[ " + std::to_string(status) + " -ne 0 ] && { echo 'curl: (6) Could not resolve host: brew.sh' >&2; exit " +
+                          std::to_string(status) + "; }\ncp '" + source + "' \"$out\"\n");
+    return path;
+}
+
+} // namespace
+
+TEST_CASE("lê o feed Atom do brew.sh", "[news]")
+{
+    const auto items = octo::parseFeed(kAtomFeed);
+    REQUIRE(items.size() == 2);
+    CHECK(items[0].title == "Homebrew 7.0.0");   // os posts de versão têm só o número
+    CHECK(items[0].link == "https://brew.sh/2026/09/13/homebrew-7.0.0/");   // o alternate, não o self
+    CHECK(items[0].date == "2026-09-13");
+    CHECK(items[0].description
+          == "Today, I\xE2\x80\x99m proud to announce Homebrew 7.0.0. Faster installations, stronger sandboxing and a native macOS app.");
+    // Sem summary, o começo do content.
+    CHECK(items[1].title == "Homebrew\xE2\x80\x99s new git signing key");
+    CHECK(items[1].description == "We rotated the key. Second paragraph.");
+    CHECK(octo::parseFeed(kAtomFeed, 1).size() == 1);
+}
+
+TEST_CASE("descrições longas são cortadas, e o RSS continua lido", "[news]")
+{
+    const std::string feed = "<feed><entry><title>t</title><summary>" + std::string(300, 'a') + " " + std::string(400, 'b')
+                             + "</summary></entry></feed>";
+    const auto items = octo::parseFeed(feed);
+    REQUIRE(items.size() == 1);
+    CHECK(items[0].description == std::string(300, 'a') + " …");
+    const auto rss = octo::parseFeed("<rss><channel><item><title>A &amp; B</title><link>https://x/</link>"
+                                     "<description><![CDATA[<b>ok</b>]]></description>"
+                                     "<pubDate>Tue, 02 Jun 2026 00:00:00 +0000</pubDate></item></channel></rss>");
+    REQUIRE(rss.size() == 1);
+    CHECK(rss[0].title == "A & B");
+    CHECK(rss[0].date == "Tue, 02 Jun 2026 00:00:00");
+    CHECK(octo::parseFeed("não é um feed").empty());
+}
+
+TEST_CASE("baixa o feed com o curl, guarda e avisa o que mudou", "[news]")
+{
+    TempDir dir;
+    writeFile(dir.file("feed.xml"), kAtomFeed);
+    const octo::NewsFeed feed(dir.file("cfg/news.xml"), fakeCurl(dir, dir.file("feed.xml")));
+    CHECK(feed.cached().items.empty());
+    octo::NewsResult r = feed.refresh();
+    CHECK(r.error.empty());
+    CHECK(r.updated);
+    CHECK(r.items.size() == 2);
+    CHECK(readFile(dir.file("cfg/news.xml")) == kAtomFeed);
+    // Só por https, com o certificado conferido (sem -k) e com tempo limite.
+    const auto calls = readLines(dir.file("curl.log"));
+    REQUIRE(calls.size() == 1);
+    CHECK(calls[0] == "-fsSL|--proto|=https|--max-time|30|-o|" + dir.file("cfg/news.xml.tmp") + "|" + octo::kNewsUrl);
+    // De novo, igual: não é novidade.
+    CHECK_FALSE(feed.refresh().updated);
+    CHECK(feed.cached().items.size() == 2);
+}
+
+TEST_CASE("sem rede ou com feed inválido, fica o cache", "[news]")
+{
+    TempDir dir;
+    writeFile(dir.file("news.xml"), kAtomFeed);
+    const octo::NewsResult offline = octo::NewsFeed(dir.file("news.xml"), fakeCurl(dir, "/dev/null", 6)).refresh();
+    CHECK(offline.fromCache);
+    CHECK(offline.items.size() == 2);
+    CHECK(contains(offline.error, "Could not resolve host"));
+
+    writeFile(dir.file("lixo.html"), "<html>404</html>");
+    const octo::NewsResult invalid = octo::NewsFeed(dir.file("news.xml"), fakeCurl(dir, dir.file("lixo.html"))).refresh();
+    CHECK(invalid.error == "The news feed could not be read.");
+    CHECK(readFile(dir.file("news.xml")) == kAtomFeed);   // o cache não foi trocado
+    CHECK(contains(octo::NewsFeed(dir.file("news.xml"), "/nao/existe/curl").refresh().error, "Failed to start"));
+}

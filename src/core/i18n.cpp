@@ -148,7 +148,6 @@ const Entry kEntries[] = {
     {"Artifacts", "Artefatos", "Artefactos"},
     {"Caveats", "Observações (caveats)", "Advertencias (caveats)"},
     {"Calculating sizes…", "Calculando os tamanhos…", "Calculando los tamaños…"},
-    {"Installed/Repository", "Instalados/Repositório", "Instalados/Repositorio"},
     {"%1 package(s) installed: %2 formula(e) and %3 cask(s).", "%1 pacote(s) instalado(s): %2 fórmula(s) e %3 cask(s).", "%1 paquete(s) instalado(s): %2 fórmula(s) y %3 cask(s)."},
     {"%1 package(s) in the repository.", "%1 pacote(s) no repositório.", "%1 paquete(s) en el repositorio."},
     {"Disk usage of the installed packages: %1", "Espaço ocupado pelos pacotes instalados: %1", "Espacio ocupado por los paquetes instalados: %1"},
@@ -162,11 +161,7 @@ const Entry kEntries[] = {
     {"All taps.", "Todos os taps.", "Todos los taps."},
     {"(all taps)", "(todos os taps)", "(todos los taps)"},
     {"Tap: %1", "Tap: %1", "Tap: %1"},
-    {"Find text in the Files, Output and Help tabs (F3: next, Shift+F3: previous)", "Buscar texto nas abas Arquivos, Saída e Ajuda (F3: próximo, Shift+F3: anterior)", "Buscar texto en las pestañas Archivos, Salida y Ayuda (F3: siguiente, Shift+F3: anterior)"},
-    {"Find works in the Files, Output and Help tabs.", "A busca funciona nas abas Arquivos, Saída e Ajuda.", "La búsqueda funciona en las pestañas Archivos, Salida y Ayuda."},
-    {"Menus File, Search and Help", "Menus Arquivo, Busca e Ajuda", "Menús Archivo, Búsqueda y Ayuda"},
     {"Choose the sort column (again: reverse; (brew order): original order)", "Escolher a coluna de ordenação (de novo: inverter; (ordem do brew): ordem original)", "Elegir la columna de orden (otra vez: invertir; (orden de brew): orden original)"},
-    {"Tabs Info, Files, Output and Help", "Abas Informação, Arquivos, Saída e Ajuda", "Pestañas Información, Archivos, Salida y Ayuda"},
     {"On a Mac keyboard, F keys may need fn; Alt is Option (enable \"Use Option as Meta key\").", "No teclado do Mac, as teclas F podem pedir o fn; Alt é o Option (ative \"Usar Option como tecla Meta\").", "En el teclado del Mac, las teclas F pueden requerir fn; Alt es Option (active \"Usar Option como tecla Meta\")."},
 
     // Transações (Fase 2)
@@ -216,7 +211,6 @@ const Entry kEntries[] = {
     {"This cask needs sudo: run 'sudo -v' in the terminal and try again.", "Este cask precisa do sudo: execute 'sudo -v' no terminal e tente de novo.", "Este cask necesita sudo: ejecute 'sudo -v' en el terminal e inténtelo de nuevo."},
     {"Update Homebrew and the package list (brew update)", "Atualizar o Homebrew e a lista de pacotes (brew update)", "Actualizar Homebrew y la lista de paquetes (brew update)"},
     {"Install updates (brew upgrade)", "Instalar as atualizações (brew upgrade)", "Instalar las actualizaciones (brew upgrade)"},
-    {"Tabs Info, Files, Actions, Output and Help", "Abas Informação, Arquivos, Ações, Saída e Ajuda", "Pestañas Información, Archivos, Acciones, Salida y Ayuda"},
     {"%1 is pinned.", "%1 está fixado.", "%1 está fijado."},
     {"%1 is already installed and up to date.", "%1 já está instalado e atualizado.", "%1 ya está instalado y actualizado."},
     {"Save a snapshot (Brewfile) before the transaction", "Salvar um snapshot (Brewfile) antes da transação", "Guardar un snapshot (Brewfile) antes de la transacción"},
@@ -251,6 +245,20 @@ const Entry kEntries[] = {
     {"Restore a snapshot…", "Restaurar um snapshot…", "Restaurar un snapshot…"},
     {"Pin", "Fixar", "Fijar"},
     {"Unpin", "Liberar", "Liberar"},
+
+    // Notícias (Fase 3)
+    {"The news feed could not be read.", "Não foi possível ler o feed de notícias.", "No se pudo leer el feed de noticias."},
+    {"News", "Notícias", "Noticias"},
+    {"Find text in the Files, Output, News and Help tabs (F3: next, Shift+F3: previous)", "Buscar texto nas abas Arquivos, Saída, Notícias e Ajuda (F3: próximo, Shift+F3: anterior)", "Buscar texto en las pestañas Archivos, Salida, Noticias y Ayuda (F3: siguiente, Shift+F3: anterior)"},
+    {"Get the latest Homebrew news (News tab)", "Buscar as últimas notícias do Homebrew (aba Notícias)", "Buscar las últimas noticias de Homebrew (pestaña Noticias)"},
+    {"Tabs Info, Files, Actions, Output, News and Help", "Abas Informação, Arquivos, Ações, Saída, Notícias e Ajuda", "Pestañas Información, Archivos, Acciones, Salida, Noticias y Ayuda"},
+    {"%1 news", "Notícias do %1", "Noticias de %1"},
+    {"Searching for %1 latest news...", "Buscando as últimas notícias do %1...", "Buscando las últimas noticias de %1..."},
+    {"(showing the saved news)", "(mostrando as notícias salvas)", "(mostrando las noticias guardadas)"},
+    {"No news yet. Ctrl+G gets the latest news.", "Nenhuma notícia ainda. Ctrl+G busca as últimas.", "Todavía no hay noticias. Ctrl+G busca las últimas."},
+    {"Find works in the Files, Output, News and Help tabs.", "A busca funciona nas abas Arquivos, Saída, Notícias e Ajuda.", "La búsqueda funciona en las pestañas Archivos, Salida, Noticias y Ayuda."},
+    {"%1 news: %2 item(s).", "Notícias do %1: %2 item(ns).", "Noticias de %1: %2 elemento(s)."},
+    {"Get the latest news", "Buscar as últimas notícias", "Buscar las últimas noticias"},
 };
 
 const Catalog &catalog(const std::string &loc)
