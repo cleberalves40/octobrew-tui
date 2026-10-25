@@ -68,11 +68,18 @@ núcleo que fala com o gerenciador de pacotes foi reescrito: `core/brew` no luga
 - Exportar um Brewfile (`brew bundle dump`) e instalar de um (`brew bundle check` como
   prévia, `brew bundle install --no-upgrade`).
 
-### Fase 5 — Distribuição (v1.0.0)
-- Tap próprio (`cleberalves40/homebrew-tap`), validado no CI com
-  `brew audit --strict --new` e `brew test`.
-- Envio ao homebrew-core quando o projeto atender aos critérios de notabilidade.
-- Homebrew no Linux (o núcleo já procura o brew em `/home/linuxbrew/.linuxbrew`).
+### Fase 5 — Distribuição ✅ (v1.0.0)
+- Tap próprio, [cleberalves40/homebrew-tap](https://github.com/cleberalves40/homebrew-tap):
+  `brew install cleberalves40/tap/octobrew-tui`. A fórmula fica também neste
+  repositório (`homebrew/`), validada no CI com `brew audit --strict --online`, a
+  instalação a partir do código e o `brew test` (veja `docs/RELEASING.md`).
+- Tags e releases a partir da v0.1.0.
+- Envio ao homebrew-core quando o projeto atender aos critérios de notabilidade (o
+  `brew audit --new` já passa; a notabilidade só o core confere).
+- Homebrew no Linux: o núcleo já procura o brew em `/home/linuxbrew/.linuxbrew`, e a
+  fórmula não tem nada específico do macOS; falta um job de Linux com o Homebrew.
+- Bottles (binários pré-compilados no tap, com `brew test-bot`), para não compilar na
+  instalação.
 
 ## Riscos e decisões em aberto
 

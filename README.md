@@ -1,5 +1,6 @@
 # octobrew-tui
 
+[![Build & Test](https://github.com/cleberalves40/octobrew-tui/actions/workflows/build.yml/badge.svg)](https://github.com/cleberalves40/octobrew-tui/actions/workflows/build.yml)
 [![License: GPL v2+](https://img.shields.io/badge/License-GPL%20v2%2B-blue.svg)](LICENSE)
 
 Interface de terminal (TUI) para o [Homebrew](https://brew.sh), o gerenciador de pacotes
@@ -36,8 +37,8 @@ para instalar e **x** para remover.)
 
 ## Estado
 
-**v0.4.0** (as Fases 1 a 4 do [roadmap](docs/ROADMAP.md)): todas as abas do OctoPkg e o
-que só o Homebrew tem. O programa:
+**v1.0.0** (as Fases 1 a 5 do [roadmap](docs/ROADMAP.md)): todas as abas do OctoPkg, o
+que só o Homebrew tem, e a instalação pelo próprio Homebrew. O programa:
 
 - marca pacotes para instalar (**+**) e remover (**-**), mostra a prévia da transação e
   a executa (**Alt+M**), com um snapshot em Brewfile antes;
@@ -54,13 +55,24 @@ que só o Homebrew tem. O programa:
   com a confiança do brew 6+; filtra as folhas (**l**, como o `brew leaves`); roda o
   `brew doctor`; e exporta e instala de Brewfiles, tudo no menu **Homebrew** (**Alt+H**).
 
-A próxima fase é a distribuição (o tap próprio e a v1.0.0). Veja o [CHANGELOG](CHANGELOG.md).
+Veja o [CHANGELOG](CHANGELOG.md).
 
-## Requisitos
+## Instalação
+
+```sh
+brew install cleberalves40/tap/octobrew-tui
+brew install --cask font-jetbrains-mono-nerd-font   # ícones; opcional
+octobrew-tui
+```
+
+O nome completo (`cleberalves40/tap/…`) adiciona o tap e, no brew 6+, já confia nele. O
+brew compila a partir do código, com o CMake e o Ninja, e o `brew upgrade` traz as
+versões novas. O processo de versão está em [docs/RELEASING.md](docs/RELEASING.md).
+
+## Requisitos (para compilar)
 
 ```sh
 brew install ftxui cmake ninja
-brew install --cask font-jetbrains-mono-nerd-font   # ícones; opcional
 ```
 
 Para os ícones, configure o terminal com a fonte **JetBrainsMono Nerd Font Mono**. Sem
