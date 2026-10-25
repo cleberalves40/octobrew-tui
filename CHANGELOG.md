@@ -5,6 +5,29 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 e o projeto usa [versionamento semântico](https://semver.org/lang/pt-BR/),
 com tags no formato `vX.Y.Z`.
 
+## [1.0.0] - 2026-10-25
+
+Distribuição (Fase 5 do [roadmap](docs/ROADMAP.md)): o octobrew-tui se instala com o
+próprio Homebrew, e a interface e as teclas ficam estáveis.
+
+### Adicionado
+- Fórmula do Homebrew em `homebrew/octobrew-tui.rb`, para o tap
+  [cleberalves40/homebrew-tap](https://github.com/cleberalves40/homebrew-tap):
+  `brew install cleberalves40/tap/octobrew-tui`. Compila com o CMake e o Ninja a partir
+  do código da tag e depende do `ftxui` do Homebrew; o `brew test` confere o
+  `--version`, o `--help` e a saída de uma opção desconhecida.
+- `ci/formula-sha.sh`: aponta a fórmula para uma versão publicada (o `url` e o `sha256`
+  do tarball da tag) e, com `--check`, confere se ela bate. A fórmula acompanha a última
+  tag publicada, como o port do octopkg-tui.
+- CI: o job **Fórmula** (`ci/formula-test.sh`), que põe a fórmula num tap local e roda
+  o `brew style`, o `brew audit --strict --online`, a instalação a partir do código, o
+  `brew test`, o `brew linkage --test` e o programa instalado num pseudo-terminal; o
+  `brew audit --new` só informa o que o homebrew-core ainda recusaria. O job do macOS
+  confere se a fórmula não está à frente do `CMakeLists.txt` e se o `sha256` bate.
+- `docs/RELEASING.md`: o processo de versão (um PR por versão contra o `main`, a tag, a
+  fórmula, o tap) e o envio ao homebrew-core.
+- Tags e releases v0.1.0 a v0.4.0, nos commits de merge do `main`.
+
 ## [0.4.0] - 2026-10-25
 
 O que só o Homebrew tem (Fase 4 do [roadmap](docs/ROADMAP.md)): serviços, taps, folhas,
