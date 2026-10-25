@@ -5,6 +5,33 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 e o projeto usa [versionamento semântico](https://semver.org/lang/pt-BR/),
 com tags no formato `vX.Y.Z`.
 
+## [1.0.1] - 2026-10-25
+
+Os atalhos na notação do teclado da Apple.
+
+### Alterado
+- No macOS, a Ajuda, os menus, a barra de teclas e as dicas da tela mostram os atalhos
+  como os menus do macOS: <kbd>⌃</kbd> (Control), <kbd>⌥</kbd> (Option), <kbd>⇧</kbd>
+  (Shift), <kbd>↩</kbd>, <kbd>⇥</kbd>, <kbd>⌦</kbd> (o delete para a frente, fn ⌫) e
+  fn↑ fn↓ fn← fn→ para Page Up, Page Down, Home e End. Por exemplo, ⌥M aplica, ⌃K
+  atualiza o Homebrew e ⌥H abre o menu Homebrew. O Insert, que o teclado da Apple não
+  tem, sai dos textos. A barra de teclas mostra ⌥M no lugar do M-m.
+- A nota da Ajuda sobre o teclado do Mac diz como ativar o ⌥ (Option) como Meta no
+  terminal, e só aparece no macOS.
+- No Linux, nada muda: os nomes do teclado de PC (Alt+M, Ctrl+L, M-m).
+- As teclas em si não mudaram, e o ⌘ continua sem uso: o terminal não o repassa ao
+  programa.
+- O README e o `docs/KEYMAP.md` usam a mesma notação, com uma tabela de equivalência
+  para o Linux.
+
+### Corrigido
+- Num terminal de 80 colunas em português (ou com a contagem de muitos arquivos), a
+  barra de abas ainda passava da largura sem os ícones, e a aba Serviços era cortada.
+  Agora as abas perdem o nome uma a uma, da última para a primeira, até caber, ficando
+  o número e a contagem; a aba atual sempre tem o nome.
+- Na aba Ajuda, uma descrição longa (a das folhas, em português) encolhia a coluna das
+  teclas e desalinhava a linha; agora a descrição é cortada.
+
 ## [1.0.0] - 2026-10-25
 
 Distribuição (Fase 5 do [roadmap](docs/ROADMAP.md)): o octobrew-tui se instala com o

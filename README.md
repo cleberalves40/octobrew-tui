@@ -41,8 +41,8 @@ para instalar e **x** para remover.)
 que só o Homebrew tem, e a instalação pelo próprio Homebrew. O programa:
 
 - marca pacotes para instalar (**+**) e remover (**-**), mostra a prévia da transação e
-  a executa (**Alt+M**), com um snapshot em Brewfile antes;
-- instala as atualizações (**Ctrl+U**), atualiza o Homebrew (**Ctrl+K**), limpa o cache,
+  a executa (**⌥M**), com um snapshot em Brewfile antes;
+- instala as atualizações (**⌃U**), atualiza o Homebrew (**⌃K**), limpa o cache,
   remove as dependências desnecessárias, fixa e libera pacotes e restaura um snapshot;
 - lista as fórmulas e os casks instalados e os do repositório;
 - mostra os detalhes do pacote selecionado, incluindo os *caveats*;
@@ -50,10 +50,10 @@ que só o Homebrew tem, e a instalação pelo próprio Homebrew. O programa:
 - busca por nome ou por descrição (**F7**) e filtra por tap (**F8**);
 - ordena por qualquer coluna (**F6**) e maximiza a lista ou as abas (**F11**);
 - tem os 15 temas e as Preferências do octopkg-tui;
-- mostra as notícias do blog do Homebrew (aba **5**, **Ctrl+G**);
+- mostra as notícias do blog do Homebrew (aba **5**, **⌃G**);
 - mostra os serviços (aba **7**) e os inicia, para e reinicia; adiciona e remove taps,
   com a confiança do brew 6+; filtra as folhas (**l**, como o `brew leaves`); roda o
-  `brew doctor`; e exporta e instala de Brewfiles, tudo no menu **Homebrew** (**Alt+H**).
+  `brew doctor`; e exporta e instala de Brewfiles, tudo no menu **Homebrew** (**⌥H**).
 
 Veja o [CHANGELOG](CHANGELOG.md).
 
@@ -92,7 +92,7 @@ cmake --build build
 Opções: `--remote` (começa na visão Repositório), `--icons=nerd|unicode|ascii`,
 `--lang=en_US|pt_BR|es_ES`, `--theme=TEMA`, `--config=ARQUIVO`, `--brew=EXECUTÁVEL`,
 `--version`. As preferências ficam em `~/.config/octobrew-tui/config`: a ordem da tabela,
-o modo de busca, o tema, o idioma e os ícones (pelo diálogo de Preferências, **Alt+,**).
+o modo de busca, o tema, o idioma e os ícones (pelo diálogo de Preferências, **⌥,**).
 
 ## Como ele lê o Homebrew
 
@@ -100,7 +100,7 @@ o modo de busca, o tema, o idioma e os ícones (pelo diálogo de Preferências, 
 |:---|:---|:---|
 | Instalados (fórmulas e casks, com desatualizados, pins e dependências) | `brew info --json=v2 --installed`, uma chamada | ~2 s (o Ruby do brew) |
 | Repositório (~16 mil fórmulas e casks) | o cache da API do Homebrew, lido direto (`$(brew --cache)/api/internal/packages.*.jws.json`; no brew 4, `formula.jws.json` e `cask.jws.json`), sem rede e sem Ruby | ~0,3 s |
-| Notícias (aba 5) | `https://brew.sh/atom.xml`, com o `/usr/bin/curl` (só https, certificado conferido), em cache em `~/.config/octobrew-tui/news.xml` | na primeira visita e no Ctrl+G, em segundo plano |
+| Notícias (aba 5) | `https://brew.sh/atom.xml`, com o `/usr/bin/curl` (só https, certificado conferido), em cache em `~/.config/octobrew-tui/news.xml` | na primeira visita e no ⌃G, em segundo plano |
 | Pacotes dos taps de terceiros (visão Repositório) | `brew tap-info --json --installed`: o nome e o tap | ~1,5 s, junto da lista do repositório |
 | Serviços (aba 7) | `brew services list --json` | ~2 s, na primeira visita, no F5 e depois de cada ação |
 | Detalhes do selecionado | `brew info --json=v2 --formula\|--cask NOME` | ~0,5–1 s, em segundo plano e em cache |
@@ -122,10 +122,10 @@ O Homebrew não roda como root, e o octobrew-tui também não.
 
 | Ação | Prévia (não muda nada) | Operação |
 |:---|:---|:---|
-| Alt+M: instalar os marcados com + | `brew install --dry-run --formula …` / `--cask …` | `brew install --no-ask --formula …` / `--cask …` |
-| Alt+M: remover os marcados com − | os dependentes, dos recibos do brew já lidos | `brew uninstall --cask …`, depois `--formula …` |
-| Ctrl+U: instalar as atualizações | `brew upgrade --dry-run` | `brew upgrade --no-ask` |
-| Ctrl+K: atualizar o Homebrew | — | `brew update` |
+| ⌥M: instalar os marcados com + | `brew install --dry-run --formula …` / `--cask …` | `brew install --no-ask --formula …` / `--cask …` |
+| ⌥M: remover os marcados com − | os dependentes, dos recibos do brew já lidos | `brew uninstall --cask …`, depois `--formula …` |
+| ⌃U: instalar as atualizações | `brew upgrade --dry-run` | `brew upgrade --no-ask` |
+| ⌃K: atualizar o Homebrew | — | `brew update` |
 | Limpar o cache local | `brew cleanup --dry-run --prune=all` | `brew cleanup --prune=all` |
 | Remover dependências desnecessárias | `brew autoremove --dry-run` | `brew autoremove` |
 | Fixar / Liberar | — | `brew pin` / `brew unpin` |
@@ -154,39 +154,43 @@ O Homebrew não roda como root, e o octobrew-tui também não.
 
 ## Teclado e mouse
 
-As teclas são as do octopkg-tui. No teclado do Mac, as teclas F podem pedir o **fn**,
-então cada uma tem uma alternativa:
+As teclas são as do octopkg-tui, na notação do teclado da Apple: <kbd>⌃</kbd> Control,
+<kbd>⌥</kbd> Option, <kbd>⇧</kbd> Shift, <kbd>⌦</kbd> o delete para a frente (fn ⌫), e
+fn↑ fn↓ fn← fn→ para Page Up, Page Down, Home e End. No teclado do Mac, as teclas F podem
+pedir o **fn**, então cada uma tem uma alternativa. No Linux, ⌥ é o Alt e ⌃ é o Ctrl, e a
+interface mostra os nomes do teclado de PC (Alt+M, Ctrl+L).
 
 | Tecla | Ação |
 |:---|:---|
-| <kbd>F5</kbd> / <kbd>Ctrl+R</kbd> | Atualizar a lista |
-| <kbd>↑</kbd> <kbd>↓</kbd> <kbd>PgUp</kbd> <kbd>PgDn</kbd> <kbd>Home</kbd> <kbd>End</kbd> (ou <kbd>j</kbd> <kbd>k</kbd>) | Mover a seleção |
-| <kbd>Ctrl+L</kbd> / <kbd>/</kbd> | Buscar pelo nome, ou pela descrição (<kbd>Esc</kbd>, <kbd>Enter</kbd> ou <kbd>Ctrl+P</kbd> volta à lista) |
-| <kbd>F7</kbd> / <kbd>Alt+D</kbd> | Buscar por nome ou por descrição |
+| <kbd>F5</kbd> / <kbd>⌃R</kbd> | Atualizar a lista |
+| <kbd>↑</kbd> <kbd>↓</kbd> <kbd>fn↑</kbd> <kbd>fn↓</kbd> <kbd>fn←</kbd> <kbd>fn→</kbd> (ou <kbd>j</kbd> <kbd>k</kbd>) | Mover a seleção |
+| <kbd>⌃L</kbd> / <kbd>/</kbd> | Buscar pelo nome, ou pela descrição (<kbd>Esc</kbd>, <kbd>↩</kbd> ou <kbd>⌃P</kbd> volta à lista) |
+| <kbd>F7</kbd> / <kbd>⌥D</kbd> | Buscar por nome ou por descrição |
 | <kbd>F8</kbd> / <kbd>t</kbd> | Filtrar por tap (homebrew/core, homebrew/cask, taps de terceiros); uma letra salta na lista |
-| <kbd>i</kbd> / <kbd>Alt+I</kbd> | Alternar entre os instalados e o repositório |
-| <kbd>+</kbd> / <kbd>Insert</kbd> | Marcar o pacote para instalar (de novo: desmarca) |
-| <kbd>-</kbd> / <kbd>Delete</kbd> | Marcar o pacote para remover |
-| <kbd>Alt+M</kbd> | Aplicar: prévia, confirmação e a transação |
-| <kbd>Ctrl+E</kbd> | Desfazer as marcas |
-| <kbd>Ctrl+U</kbd> / <kbd>Ctrl+K</kbd> | Instalar as atualizações / atualizar o Homebrew |
+| <kbd>i</kbd> / <kbd>⌥I</kbd> | Alternar entre os instalados e o repositório |
+| <kbd>+</kbd> | Marcar o pacote para instalar (de novo: desmarca) |
+| <kbd>-</kbd> / <kbd>⌦</kbd> | Marcar o pacote para remover |
+| <kbd>⌥M</kbd> | Aplicar: prévia, confirmação e a transação |
+| <kbd>⌃E</kbd> | Desfazer as marcas |
+| <kbd>⌃U</kbd> / <kbd>⌃K</kbd> | Instalar as atualizações / atualizar o Homebrew |
 | <kbd>F6</kbd> / <kbd>s</kbd> | Escolher a coluna de ordenação (de novo na mesma coluna inverte) |
 | Clique no cabeçalho | Ordenar: crescente, decrescente, ordem do brew |
-| <kbd>1</kbd>…<kbd>6</kbd> / <kbd>Alt+1</kbd>…<kbd>Alt+6</kbd> | Abas Informação, Arquivos, Ações, Saída, Notícias e Ajuda, com os números do OctoPkg |
-| <kbd>7</kbd> / <kbd>Alt+7</kbd> | Aba Serviços (`brew services`) |
+| <kbd>1</kbd>…<kbd>6</kbd> / <kbd>⌥1</kbd>…<kbd>⌥6</kbd> | Abas Informação, Arquivos, Ações, Saída, Notícias e Ajuda, com os números do OctoPkg |
+| <kbd>7</kbd> / <kbd>⌥7</kbd> | Aba Serviços (`brew services`) |
 | <kbd>l</kbd> | Só as folhas: fórmulas instaladas de que nada mais depende (`brew leaves`) |
-| <kbd>Ctrl+G</kbd> | Buscar as últimas notícias do Homebrew (aba Notícias) |
+| <kbd>⌃G</kbd> | Buscar as últimas notícias do Homebrew (aba Notícias) |
 | <kbd>F1</kbd> / <kbd>?</kbd> | Ajuda |
-| <kbd>Enter</kbd> | Aba Informação do pacote selecionado |
-| <kbd>Tab</kbd> | Rolar a aba com as setas (de novo, ou <kbd>Esc</kbd>, volta à lista) |
-| <kbd>Ctrl+F</kbd> | Buscar texto nas abas Arquivos, Saída, Notícias e Ajuda (<kbd>F3</kbd> / <kbd>Shift+F3</kbd>) |
-| <kbd>F9</kbd> / <kbd>Alt+A</kbd> <kbd>Alt+B</kbd> <kbd>Alt+C</kbd> <kbd>Alt+H</kbd> <kbd>Alt+J</kbd> | Menus Arquivo, Busca, Ações, Homebrew e Ajuda |
-| <kbd>Alt+,</kbd> / <kbd>Alt+T</kbd> | Preferências (tema, idioma, ícones) / próximo tema |
-| <kbd>F11</kbd> / <kbd>Alt+Z</kbd> | Maximizar a lista, depois as abas, depois voltar às duas |
-| <kbd>Ctrl+Q</kbd> / <kbd>F10</kbd> / <kbd>q</kbd> | Sair (não durante uma operação) |
+| <kbd>↩</kbd> | Aba Informação do pacote selecionado |
+| <kbd>⇥</kbd> | Rolar a aba com as setas (de novo, ou <kbd>Esc</kbd>, volta à lista) |
+| <kbd>⌃F</kbd> | Buscar texto nas abas Arquivos, Saída, Notícias e Ajuda (<kbd>F3</kbd> / <kbd>⇧F3</kbd>) |
+| <kbd>F9</kbd> / <kbd>⌥A</kbd> <kbd>⌥B</kbd> <kbd>⌥C</kbd> <kbd>⌥H</kbd> <kbd>⌥J</kbd> | Menus Arquivo, Busca, Ações, Homebrew e Ajuda |
+| <kbd>⌥,</kbd> / <kbd>⌥T</kbd> | Preferências (tema, idioma, ícones) / próximo tema |
+| <kbd>F11</kbd> / <kbd>⌥Z</kbd> | Maximizar a lista, depois as abas, depois voltar às duas |
+| <kbd>⌃Q</kbd> / <kbd>F10</kbd> / <kbd>q</kbd> | Sair (não durante uma operação) |
 
-No Terminal do macOS, ative **"Usar Option como tecla Meta"** para os atalhos com Alt (no
-iTerm2: *Left Option key: Esc+*). O mapa completo está em [docs/KEYMAP.md](docs/KEYMAP.md).
+No Terminal do macOS, ative **"Usar Option como tecla Meta"** para os atalhos com ⌥
+(Terminal → Ajustes → Perfis → Teclado; no iTerm2, *Left Option key: Esc+*). O ⌘ não
+serve: o terminal não o repassa ao programa. O mapa completo está em [docs/KEYMAP.md](docs/KEYMAP.md).
 
 ## Arquitetura
 
