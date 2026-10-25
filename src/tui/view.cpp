@@ -114,9 +114,18 @@ Element header(const ViewState &s, HitBoxes *boxes)
 Element row(const ViewState &s, size_t i, HitBoxes *boxes)
 {
     const octo::Package &p = s.rows[i];
-    Element icon = text(std::string(" ") + stateIcon(s.iconMode, p));
-    if (p.installed)
-        icon = icon | color(stateColor(p));
+    const IconSet &ic = icons(s.iconMode);
+    const std::string key = p.key();
+    Element icon;
+    if (s.toInstall.count(key))
+        icon = text(std::string(" ") + ic.toInstall) | color(T().green) | bold;
+    else if (s.toRemove.count(key))
+        icon = text(std::string(" ") + ic.toRemove) | color(T().red) | bold;
+    else {
+        icon = text(std::string(" ") + stateIcon(s.iconMode, p));
+        if (p.installed)
+            icon = icon | color(stateColor(p));
+    }
     // Enquanto os tamanhos são calculados, os instalados mostram "…".
     std::string size;
     if (p.size > 0)
@@ -134,7 +143,7 @@ Element row(const ViewState &s, size_t i, HitBoxes *boxes)
         text("  "),
         cell(text(octo::formatTime(p.installedOn)), kDateWidth),
     });
-    if (!p.installed)
+    if (!p.installed && !s.toInstall.count(key))
         line = line | faint();
     if (static_cast<int>(i) == s.selected)
         line = line | (s.contentFocused ? Decorator(underlined) : highlight());
@@ -161,9 +170,14 @@ Element tabs(const ViewState &s, HitBoxes *boxes)
     std::string files = std::string(ic.files) + " " + i18n::tr("Files");
     if (s.detailsReady && s.details.installed && !s.details.filesTruncated)
         files += " (" + std::to_string(s.details.files.size()) + ")";
+    std::string actions = std::string(ic.actions) + " " + i18n::tr("Actions");
+    const size_t marked = s.toInstall.size() + s.toRemove.size();
+    if (marked)
+        actions += " (" + std::to_string(marked) + ")";
     const std::string labels[TabCount] = {
         std::string(ic.info) + " " + i18n::tr("Info"),
         files,
+        actions,
         std::string(ic.output) + " " + i18n::tr("Output"),
         std::string(ic.help) + " " + i18n::tr("Help"),
     };
@@ -288,12 +302,18 @@ std::vector<std::pair<std::string, std::string>> helpEntries()
         {"F8  t", i18n::tr("Filter by tap (homebrew/core, homebrew/cask...)")},
         {"Esc  Enter  Ctrl+P", i18n::tr("Go back to the package list")},
         {"i  Alt+I", i18n::tr("Switch between installed and repository packages")},
+        {"+  Insert", i18n::tr("Mark the selected package for installation")},
+        {"-  Delete", i18n::tr("Mark the selected package for removal")},
+        {"Alt+M", i18n::tr("Apply: install and remove the marked packages")},
+        {"Ctrl+E", i18n::tr("Cancel: clear the marks")},
+        {"Ctrl+K", i18n::tr("Update Homebrew and the package list (brew update)")},
+        {"Ctrl+U", i18n::tr("Install updates (brew upgrade)")},
         {"Ctrl+F", i18n::tr("Find text in the Files, Output and Help tabs (F3: next, Shift+F3: previous)")},
         {"Alt+,", i18n::tr("Preferences: theme, language and icons")},
         {"Alt+T", i18n::tr("Next theme")},
-        {"F9  Alt+A Alt+B Alt+J", i18n::tr("Menus File, Search and Help")},
+        {"F9  Alt+A Alt+B Alt+C Alt+J", i18n::tr("Menus File, Search, Actions and Help")},
         {"F6  s", i18n::tr("Choose the sort column (again: reverse; (brew order): original order)")},
-        {"1 2 4 6  Alt+1…Alt+6", i18n::tr("Tabs Info, Files, Output and Help")},
+        {"1-4 6  Alt+1…Alt+6", i18n::tr("Tabs Info, Files, Actions, Output and Help")},
         {"F1  ?", i18n::tr("Show this help page")},
         {"Enter", i18n::tr("Show the Info tab of the selected package")},
         {"Tab", i18n::tr("Scroll the tab with the arrow keys")},
@@ -316,6 +336,28 @@ Elements helpLines()
     return out;
 }
 
+Elements actionsLines(const ViewState &s)
+{
+    Elements out;
+    if (s.toInstall.empty() && s.toRemove.empty()) {
+        out.push_back(text(i18n::tr("No packages marked. Use + to install and - to remove.")) | faint());
+        return out;
+    }
+    const IconSet &ic = icons(s.iconMode);
+    const auto section = [&](const std::string &title, const std::set<std::string> &keys, const char *icon,
+                             Color c) {
+        if (keys.empty())
+            return;
+        out.push_back(text(title + " (" + std::to_string(keys.size()) + ")") | bold);
+        for (const auto &k : keys)
+            out.push_back(hbox({text(std::string("  ") + icon + " ") | color(c), text(keyLabel(k))}));
+    };
+    section(i18n::tr("To be installed"), s.toInstall, ic.toInstall, T().green);
+    section(i18n::tr("To be removed"), s.toRemove, ic.toRemove, T().red);
+    out.push_back(text(i18n::tr("Alt+M: apply   Ctrl+E: cancel")) | faint());
+    return out;
+}
+
 Elements outputLines(const ViewState &s)
 {
     Elements out;
@@ -329,6 +371,7 @@ Element tabContent(const ViewState &s, HitBoxes *boxes)
     Elements lines;
     switch (s.tab) {
     case FilesTab:  lines = filesLines(s); break;
+    case ActionsTab: lines = actionsLines(s); break;
     case OutputTab: lines = outputLines(s); break;
     case HelpTab:   lines = helpLines(); break;
     default:        lines = infoLines(s); break;
@@ -383,6 +426,10 @@ Element statusBar(const ViewState &s)
     if (s.error)
         l = l | color(T().red);
     Elements right;
+    if (!s.toInstall.empty())
+        right.push_back(text("+" + std::to_string(s.toInstall.size()) + "  ") | color(T().green));
+    if (!s.toRemove.empty())
+        right.push_back(text("-" + std::to_string(s.toRemove.size()) + "  ") | color(T().red));
     if (s.sizing)
         right.push_back(text(i18n::tr("Calculating sizes…") + "  ") | faint());
     right.push_back(text(i18n::trf("Theme: %1", {T().system ? i18n::tr("System") : std::string(T().label)}) + "  ")
@@ -406,7 +453,7 @@ Element keyBar()
     return hbox({key("F1", i18n::tr("Help")), text(" "), key("F5", i18n::tr("Refresh")), text(" "),
                  key("F6", i18n::tr("Sort")), text(" "), key("F8", i18n::tr("Tap")), text(" "),
                  key("F9", i18n::tr("Menu")), text(" "), key("F10", i18n::tr("Exit")), text(" "),
-                 key("i", i18n::tr("Installed/Repository")), filler()});
+                 key("+/-", i18n::tr("Mark")), text(" "), key("M-m", i18n::tr("Apply")), filler()});
 }
 
 Element button(const std::string &label, bool focused, bool danger)
@@ -647,7 +694,7 @@ std::vector<int> findLines(const std::vector<std::string> &lines, const std::str
 
 char tabKey(int tab)
 {
-    static const char keys[TabCount] = {'1', '2', '4', '6'};
+    static const char keys[TabCount] = {'1', '2', '3', '4', '6'};
     return tab >= 0 && tab < TabCount ? keys[tab] : '?';
 }
 
@@ -662,6 +709,13 @@ std::string columnTitle(int column)
     case model::InstalledOn: return i18n::tr("Installed on");
     default:                 return std::string();
     }
+}
+
+std::string keyLabel(const std::string &key)
+{
+    if (key.rfind("c:", 0) == 0)
+        return key.substr(2) + " (cask)";
+    return key.rfind("f:", 0) == 0 ? key.substr(2) : key;
 }
 
 std::string kindText(octo::Kind kind)

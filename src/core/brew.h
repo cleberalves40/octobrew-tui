@@ -10,6 +10,8 @@
 
 #include <atomic>
 #include <cstdint>
+#include <ctime>
+#include <functional>
 #include <map>
 #include <mutex>
 #include <string>
@@ -79,6 +81,29 @@ struct Details {
     std::int64_t installedOn = 0;
 };
 
+/**
+ * Prévia de uma transação: a saída do "brew install --dry-run", do "brew
+ * upgrade --dry-run", do "brew autoremove --dry-run" ou do "brew cleanup
+ * --dry-run", como o OctoPkg lê a do pkg -n.
+ */
+struct TransactionPreview {
+    struct Section {
+        std::string title;               // "Would install 2 formulae", "Would upgrade 1 outdated package"
+        std::string verb;                // install, upgrade, autoremove, remove, reinstall
+        std::vector<std::string> items;  // como o brew as imprime, sem o alinhamento: "curl 8.9.1 -> 8.10.0"
+    };
+    std::vector<Section> sections;
+    std::string freed;                   // cleanup: "6.2GB", de "would free approximately 6.2GB"
+    std::vector<std::string> warnings;   // "Warning: ..." (casks desativados, pins...), sem o prefixo
+
+    int count() const;
+    /** Itens das seções com o verbo (vazio: todas). */
+    std::vector<std::string> items(const std::string &verb = std::string()) const;
+};
+
+/** Função que recebe a saída de uma operação à medida que ela roda. */
+using OutputFn = std::function<void(const std::string &chunk)>;
+
 // --- Leitura do JSON (funções puras, testadas sem o brew) ---
 
 /** "brew info --json=v2 --installed": fórmulas e casks instalados, com o estado. */
@@ -119,6 +144,38 @@ std::string formatTime(std::int64_t unixTime);
  */
 bool validPackageName(const std::string &name);
 
+// --- Transações (funções puras) ---
+
+TransactionPreview parseDryRun(const std::string &output, const std::string &errors = std::string());
+/** Nome do pacote num item da prévia ("curl 8.9.1 -> 8.10.0" → "curl"). */
+std::string itemName(const std::string &item);
+
+/**
+ * O que a remoção de keys (Package::key()) leva junto: os instalados que
+ * dependem deles, direta ou indiretamente, fora os próprios keys. O brew
+ * recusa a remoção enquanto houver dependentes, então eles precisam ir
+ * juntos, como o "pkg remove -R" do OctoPkg.
+ */
+std::vector<std::string> dependentsClosure(const std::vector<Package> &installed, const std::vector<std::string> &keys);
+
+/**
+ * Pacotes que o octobrew-tui não deixa remover, como o Package::isForbidden do
+ * OctoPkg: o FTXUI, de que o próprio programa depende, e o próprio programa.
+ */
+bool isForbidden(const Package &p);
+
+/**
+ * O cask (um registro do "brew info --json=v2 --cask") pede o sudo para
+ * instalar ou remover: instaladores .pkg e passos de desinstalação no sistema
+ * (pkgutil, launchctl, kext, scripts, arquivos fora do usuário).
+ */
+bool caskNeedsSudo(const std::string &infoJson, const std::string &token);
+
+/** Nome de um snapshot antes da transação, como o do Boot Environment: "AAMMDD-hhmmss.Brewfile". */
+std::string snapshotName(std::time_t when);
+/** Os snapshots em dir, do mais novo ao mais antigo (só os nomes). */
+std::vector<std::string> listSnapshots(const std::string &dir);
+
 /**
  * Bytes em disco da árvore em path, sem seguir links simbólicos (o tamanho
  * aparente dos arquivos, como o flatsize do pkg). cancel, se dado, interrompe.
@@ -142,6 +199,38 @@ public:
     /** "Homebrew 7.0.10" */
     std::string version() const;
 
+    // --- Prévias (dry-run): não mudam nada ---
+    TransactionPreview previewInstall(const std::vector<Package> &packages) const;
+    TransactionPreview previewUpgrade() const;
+    TransactionPreview previewAutoremove() const;
+    TransactionPreview previewCleanup() const;
+    /** Os casks de tokens que pedem o sudo (uma chamada ao brew info). */
+    std::vector<std::string> casksNeedingSudo(const std::vector<std::string> &tokens) const;
+
+    // --- Operações ---
+    // interactive: o brew roda com o terminal (a tela suspensa), e o sudo
+    // pode pedir a senha. Sem ele, um sudo que precise de senha falha na
+    // hora (SUDO_ASKPASS=/usr/bin/false) em vez de disputar a tela.
+    void install(const std::vector<Package> &packages, const OutputFn &out = nullptr, bool interactive = false) const;
+    void uninstall(const std::vector<Package> &packages, const OutputFn &out = nullptr, bool interactive = false) const;
+    void upgrade(const OutputFn &out = nullptr, bool interactive = false) const;
+    void update(const OutputFn &out = nullptr) const;
+    void cleanup(const OutputFn &out = nullptr) const;
+    void autoremove(const OutputFn &out = nullptr) const;
+    void pin(const Package &p, bool pin, const OutputFn &out = nullptr) const;
+    /** brew bundle dump: o estado instalado, num Brewfile. */
+    void snapshot(const std::string &file, const OutputFn &out = nullptr) const;
+    /** brew bundle install: instala o que falta do Brewfile, sem atualizar o resto. */
+    void restore(const std::string &file, const OutputFn &out = nullptr, bool interactive = false) const;
+
+    /** Linha de comando de uma operação, para a aba Saída ("brew install --formula curl"). */
+    std::string commandLine(const std::vector<std::string> &args) const;
+
+    // Os argumentos de cada operação (para a aba Saída e os testes).
+    static std::vector<std::vector<std::string>> installArgs(const std::vector<Package> &packages);
+    static std::vector<std::vector<std::string>> uninstallArgs(const std::vector<Package> &packages);
+    static std::vector<std::string> pinArgs(const Package &p, bool pin);
+
     struct Paths {
         std::string cellar;     // brew --cellar
         std::string caskroom;   // brew --caskroom
@@ -157,6 +246,8 @@ public:
 
 private:
     std::string query(const std::vector<std::string> &args) const;
+    TransactionPreview dryRun(const std::vector<std::string> &args) const;
+    void run(const std::vector<std::string> &args, const OutputFn &out, bool interactive) const;
 
     std::string m_brewPath;
     mutable std::mutex m_pathsMutex;

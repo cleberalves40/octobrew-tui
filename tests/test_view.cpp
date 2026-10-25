@@ -104,6 +104,9 @@ tui::Options options(const TempDir &dir, const std::string &brew)
 {
     tui::Options o;
     o.brewPath = brew;
+    // O sudo falso: "sudo -n true" passa (credenciais em cache), a menos que sudo.rc exista.
+    o.sudoPath = dir.file("sudo");
+    writeExecutable(o.sudoPath, "#!/bin/sh\n[ -f '" + dir.file("sudo.rc") + "' ] && exit 1\nexit 0\n");
     o.iconMode = "ascii";
     o.language = "en_US";
     o.settingsPath = dir.file("config");
@@ -131,8 +134,15 @@ struct AppFixture {
 struct BrewFixture {
     FakeBrew brew;
     std::unique_ptr<tui::App> app;
-    BrewFixture()
+    // unpinned: o wget sem o pin, para que o brotli possa sair com os dependentes.
+    explicit BrewFixture(bool unpinned = false)
     {
+        if (unpinned) {
+            std::string json = kInstalledJson;
+            const std::string pinned = "\"pinned\": true";
+            json.replace(json.find(pinned), pinned.size(), "\"pinned\": false");
+            writeFile(brew.dir.file("installed.json"), json);
+        }
         brew.writeApiCache();
         // Algo no Cellar e no Caskroom, para os tamanhos.
         (void)std::system(("mkdir -p '" + brew.dir.file("Cellar/curl/8.9.1") + "' '"
@@ -150,6 +160,8 @@ struct BrewFixture {
         REQUIRE(app->viewState().current.key() == key);
     }
     std::string screen() { return draw(app->viewState()); }
+    const tui::Dialog &dialog() const { return app->dialog(); }
+    std::string snapshots() const { return brew.dir.file("snapshots"); }
 };
 
 } // namespace
@@ -161,11 +173,10 @@ TEST_CASE("tela mostra colunas, linhas e estado", "[view]")
     const std::string out = draw(f.app.viewState());
     for (const char *t : {"OctoBrew — Homebrew", "[# Installed packages]", "Name ^", "Type", "Version", "Size",
                           "Installed on", "curl", "brotli", "alacritty", "Formula", "Cask", "4.00 MiB", "25.00 MiB",
-                          "Ready.", "4 package(s)", "2 outdated", "1 i Info", "2 f Files", "4 > Output", "6 ? Help",
-                          "F1", "F5", "F8", "F9", "F10"})
+                          "Ready.", "4 package(s)", "2 outdated", "1 i Info", "2 f Files", "3 a Actions",
+                          "4 > Output", "6 ? Help", "F1", "F5", "F8", "F9", "F10", "+/-", "M-m"})
         CHECK_INFO(out, t);
-    // Só as abas da v0.1.0: as de Ações (3) e Notícias (5) ainda não existem.
-    CHECK_FALSE(has(out, "3 a Actions"));
+    // A aba Notícias (5) é da Fase 3.
     CHECK_FALSE(has(out, "5 n News"));
     // Ordem pelo nome; brotli é dependência ("d"), curl desatualizado ("U"), wget fixado ("P").
     CHECK(out.find("alacritty") < out.find("brotli"));
@@ -263,7 +274,7 @@ TEST_CASE("tela em português", "[view]")
     const std::string out = draw(s);
     for (const char *t : {"Nome", "Tipo", "Versão", "Tamanho", "Instalado em", "Informação", "Arquivos", "Saída",
                           "Ajuda", "Instalados", "Fórmula", "Fixado (a versão 1.25.0_1 está disponível)",
-                          "Carregando…", "Instalados/Repositório"})
+                          "Carregando…", "Ações", "Marcar", "Aplicar"})
         CHECK_INFO(out, t);
     i18n::setLocale("en_US");
 }
@@ -392,11 +403,11 @@ TEST_CASE("atalhos de busca, abas e foco", "[app]")
     CHECK(f.app.viewState().tab == tui::OutputTab);
     f.app.handleEvent(Event::Special("\x1b" "6"));             // Alt+6: Ajuda
     CHECK(f.app.viewState().tab == tui::HelpTab);
-    // 3 e 5 são das abas Ações e Notícias, que ainda não existem: nada muda.
-    f.app.handleEvent(Event::Character('3'));
-    CHECK(f.app.viewState().tab == tui::HelpTab);
+    f.app.handleEvent(Event::Character('3'));                  // Ações
+    CHECK(f.app.viewState().tab == tui::ActionsTab);
+    // 5 é da aba Notícias, que ainda não existe: nada muda.
     f.app.handleEvent(Event::Special("\x1b" "5"));
-    CHECK(f.app.viewState().tab == tui::HelpTab);
+    CHECK(f.app.viewState().tab == tui::ActionsTab);
     f.app.handleEvent(Event::Return);                          // Enter: aba Informação
     CHECK(f.app.viewState().tab == tui::InfoTab);
     f.app.handleEvent(Event::F1);
@@ -530,16 +541,17 @@ TEST_CASE("menus Arquivo, Busca e Ajuda, e o Sobre", "[app][menu]")
     f.app->handleEvent(Event::F9);
     REQUIRE(f.app->dialog().kind == tui::Dialog::Menu);
     std::string out = f.screen();
-    for (const char *t : {"File", "Search", "Help", "Refresh the package list", "Preferences…", "Exit"})
+    for (const char *t : {"File", "Search", "Actions", "Help", "Refresh the package list", "Update Homebrew",
+                          "Ctrl+K", "Install updates", "Clean the local cache", "Remove unneeded dependencies",
+                          "Restore a snapshot…", "Preferences…", "Exit"})
         CHECK_INFO(out, t);
-    CHECK_FALSE(has(out, "Actions"));
     // Instalados/Repositório pelo menu.
     f.app->handleEvent(Event::ArrowDown);
     f.app->handleEvent(Event::Return);
     CHECK(f.app->viewState().remoteView);
 
     f.app->handleEvent(Event::Special("\x1b" "j"));   // Alt+J: Ajuda
-    REQUIRE(f.app->dialog().menu == 2);               // Arquivo, Busca, Ajuda
+    REQUIRE(f.app->dialog().menu == 3);               // Arquivo, Busca, Ações, Ajuda
     f.app->handleEvent(Event::ArrowDown);
     f.app->handleEvent(Event::Return);
     REQUIRE(f.app->dialog().kind == tui::Dialog::Message);
@@ -819,4 +831,331 @@ TEST_CASE("F11 e Alt+Z: só a lista, só as abas, e as duas", "[app][layout]")
     f.app.handleEvent(Event::F11);
     CHECK(f.app.viewState().layout == tui::Layout::Normal);
     CHECK_FALSE(f.app.viewState().contentFocused);
+}
+
+// --- v0.2.0: marcas, transações, diálogos e menus ---
+
+TEST_CASE("+ e - marcam, como no OctoPkg, e Ctrl+E desfaz", "[app][actions]")
+{
+    i18n::setLocale("en_US");
+    BrewFixture f;
+    // + num instalado em dia não faz nada; no desatualizado (curl), marca.
+    f.select("f:brotli");
+    f.app->handleEvent(Event::Character('+'));
+    CHECK(f.app->viewState().toInstall.empty());
+    CHECK(f.app->viewState().status == "brotli is already installed and up to date.");
+    f.select("f:curl");
+    f.app->handleEvent(Event::Character('+'));
+    CHECK(f.app->viewState().toInstall == std::set<std::string>{"f:curl"});
+    // Fixado: nem + nem -.
+    f.select("f:wget");
+    f.app->handleEvent(Event::Character('+'));
+    f.app->handleEvent(Event::Character('-'));
+    CHECK(f.app->viewState().status == "wget is pinned.");
+    // - no cask; de novo, desmarca; Delete faz o mesmo.
+    f.select("c:alacritty");
+    f.app->handleEvent(Event::Character('-'));
+    f.app->handleEvent(Event::Character('-'));
+    CHECK(f.app->viewState().toRemove.empty());
+    f.app->handleEvent(Event::Delete);
+    CHECK(f.app->viewState().toRemove == std::set<std::string>{"c:alacritty"});
+    // + e - se excluem.
+    f.select("f:curl");
+    f.app->handleEvent(Event::Character('-'));
+    CHECK(f.app->viewState().toRemove.count("f:curl"));
+    CHECK(f.app->viewState().toInstall.empty());
+
+    std::string out = f.screen();
+    for (const char *t : {" x alacritty", " x curl", "-2", "3 a Actions (2)"})
+        CHECK_INFO(out, t);
+    f.app->handleEvent(Event::Character('3'));
+    out = f.screen();
+    for (const char *t : {"To be removed (2)", "alacritty (cask)", "curl", "Alt+M: apply"})
+        CHECK_INFO(out, t);
+
+    // Na visão Repositório, - num não instalado é recusado, e + marca.
+    f.app->handleEvent(Event::Character('i'));
+    f.select("f:vim");
+    f.app->handleEvent(Event::Character('-'));
+    CHECK(f.app->viewState().status == "Only installed packages can be removed.");
+    f.app->handleEvent(Event::Insert);
+    CHECK(f.app->viewState().toInstall == std::set<std::string>{"f:vim"});
+    CHECK(has(f.screen(), " + vim"));
+
+    f.app->handleEvent(Event::Special("\x05"));   // Ctrl+E
+    CHECK(f.app->viewState().toInstall.empty());
+    CHECK(f.app->viewState().toRemove.empty());
+}
+
+TEST_CASE("Alt+M mostra a prévia, e OK tira o snapshot, remove e instala", "[app][actions]")
+{
+    i18n::setLocale("en_US");
+    BrewFixture f;
+    f.brew.preview("install", kInstallCaskDryRun);
+    f.app->handleEvent(Event::Character('i'));
+    f.select("c:kitty");
+    f.app->handleEvent(Event::Character('+'));
+    f.select("c:alacritty");
+    f.app->handleEvent(Event::Character('-'));
+    f.app->handleEvent(Event::Special("\x1b" "m"));   // Alt+M
+    REQUIRE(f.dialog().kind == tui::Dialog::Form);
+    CHECK(f.dialog().title == "Confirmation");
+    CHECK_FALSE(f.dialog().danger);
+    const std::string msg = f.dialog().message;
+    CHECK(has(msg, "The following package needs to be retrieved\n  • kitty"));
+    CHECK(has(msg, "The following package will be removed\n  • alacritty (cask)"));
+    REQUIRE(f.dialog().fields.size() == 1);
+    CHECK(f.dialog().fields[0].checked);   // instala algo: o snapshot vem marcado
+    CHECK(has(f.dialog().fields[0].hint, f.snapshots()));
+    CHECK(has(f.screen(), "[x] Save a snapshot (Brewfile) before the transaction"));
+    CHECK(f.brew.operations().empty());   // até aqui, só a prévia
+
+    f.app->handleEvent(Event::Return);   // OK
+    const auto ops = f.brew.operations();
+    REQUIRE(ops.size() == 3);
+    CHECK(ops[0].rfind("bundle|dump|--file=" + f.snapshots() + "/", 0) == 0);
+    CHECK(ops[1] == "uninstall|--cask|alacritty");
+    CHECK(ops[2] == "install|--no-ask|--cask|kitty");
+    CHECK(octo::listSnapshots(f.snapshots()).size() == 1);
+    CHECK(f.dialog().kind == tui::Dialog::Message);
+    CHECK(f.dialog().title == "Command finished OK!");
+    CHECK(has(f.dialog().message, "Installed: kitty (cask)"));
+    tui::ViewState s = f.app->viewState();
+    CHECK(s.toInstall.empty());
+    CHECK(s.toRemove.empty());
+    CHECK(s.tab == tui::OutputTab);   // a Saída acompanha a transação
+    bool command = false, output = false;
+    for (const auto &l : s.log) {
+        command = command || has(l, "brew uninstall --cask alacritty; brew install --cask kitty");
+        output = output || has(l, "executando install");
+    }
+    CHECK(command);
+    CHECK(output);
+    // As operações rodam sem pergunta, sem autoremove e sem o terminal.
+    bool env = false;
+    for (const auto &e : readLines(f.brew.log + ".env"))
+        env = env || has(e, "|1|1|/usr/bin/false");
+    CHECK(env);
+}
+
+TEST_CASE("remoção que leva dependentes: Aviso, foco em Cancelar, sem snapshot", "[app][actions]")
+{
+    i18n::setLocale("en_US");
+    BrewFixture f(true);
+    f.select("f:brotli");
+    f.app->handleEvent(Event::Character('-'));
+    f.app->handleEvent(Event::Special("\x1b" "m"));
+    REQUIRE(f.dialog().kind == tui::Dialog::Form);
+    CHECK(f.dialog().title == "Warning");
+    CHECK(f.dialog().danger);
+    CHECK(f.dialog().focus == 2);   // Cancelar (o campo do snapshot é o 0)
+    CHECK_FALSE(f.dialog().fields[0].checked);
+    CHECK(has(f.dialog().message, "The following 4 packages will be removed"));
+    CHECK(has(f.dialog().message, "(3 of them depend on the marked packages)"));
+    CHECK(has(f.dialog().message, "docker (cask)"));
+    // Enter no Cancelar não faz nada.
+    f.app->handleEvent(Event::Return);
+    CHECK(f.brew.operations().empty());
+    CHECK(f.app->viewState().toRemove.size() == 1);
+
+    f.app->handleEvent(Event::Special("\x1b" "m"));
+    f.app->handleEvent(Event::TabReverse);   // OK
+    f.app->handleEvent(Event::Return);
+    CHECK(f.brew.operations() == std::vector<std::string>{"uninstall|--cask|docker",
+                                                          "uninstall|--formula|brotli|curl|wget"});
+}
+
+TEST_CASE("dependente fixado ou protegido impede a remoção", "[app][actions]")
+{
+    i18n::setLocale("en_US");
+    BrewFixture f;   // o wget, fixado, depende do brotli
+    f.select("f:brotli");
+    f.app->handleEvent(Event::Character('-'));
+    f.app->handleEvent(Event::Special("\x1b" "m"));
+    REQUIRE(f.dialog().kind == tui::Dialog::Message);
+    CHECK(f.dialog().title == "Error");
+    CHECK(f.dialog().message == "wget depends on a package marked for removal and cannot be removed.");
+    CHECK(f.brew.operations().empty());
+}
+
+TEST_CASE("falhas: sem marcas, prévia que falha e operação que falha", "[app][actions]")
+{
+    i18n::setLocale("en_US");
+    BrewFixture f;
+    f.app->handleEvent(Event::Special("\x1b" "m"));
+    REQUIRE(f.dialog().kind == tui::Dialog::Message);
+    CHECK(f.dialog().message == "No packages marked. Use + to install and - to remove.");
+    f.app->handleEvent(Event::Return);
+
+    f.select("f:curl");
+    f.app->handleEvent(Event::Character('+'));
+    f.brew.failNext("install-dry");
+    f.app->handleEvent(Event::Special("\x1b" "m"));
+    REQUIRE(f.dialog().kind == tui::Dialog::Message);
+    CHECK(f.dialog().title == "Error");
+    CHECK(f.dialog().message == "install-dry falhou");
+    f.app->handleEvent(Event::Return);
+
+    ::unlink(f.brew.dir.file("install-dry.rc").c_str());
+    f.brew.failNext("install");
+    f.app->handleEvent(Event::Special("\x1b" "m"));
+    REQUIRE(f.dialog().kind == tui::Dialog::Form);
+    f.app->handleEvent(Event::ArrowUp);          // do OK para o campo do snapshot
+    f.app->handleEvent(Event::Character(' '));   // sem o snapshot
+    CHECK_FALSE(f.dialog().fields[0].checked);
+    f.app->handleEvent(Event::Return);
+    CHECK(f.dialog().title == "Error");
+    CHECK(f.dialog().message == "install falhou");
+    const tui::ViewState s = f.app->viewState();
+    CHECK(s.error);
+    CHECK(s.status == "ERROR: install falhou");   // a nova listagem não esconde o erro
+    CHECK(s.toInstall.size() == 1);               // as marcas ficam
+    CHECK(f.brew.operations() == std::vector<std::string>{"install|--no-ask|--formula|curl"});
+}
+
+TEST_CASE("cask que pede o sudo: avisa e, sem a senha em cache, usa o terminal", "[app][actions][sudo]")
+{
+    i18n::setLocale("en_US");
+    BrewFixture f;
+    std::string info = kPkgCaskInfo;
+    info.replace(info.find("\"zoom\", \"full_token\": \"zoom\""), 28, "\"alacritty\", \"full_token\": \"alacritty\"");
+    writeFile(f.brew.dir.file("alacritty.json"), info);
+    writeFile(f.brew.dir.file("sudo.rc"), "1");   // o sudo pediria a senha
+    f.select("c:alacritty");
+    f.app->handleEvent(Event::Character('-'));
+    f.app->handleEvent(Event::Special("\x1b" "m"));
+    REQUIRE(f.dialog().kind == tui::Dialog::Form);
+    CHECK(has(f.dialog().message, "Needs sudo: alacritty"));
+    CHECK(has(f.dialog().message, "The screen will be suspended while sudo asks for your password."));
+    f.app->handleEvent(Event::Return);
+    CHECK(f.brew.operations() == std::vector<std::string>{"uninstall|--cask|alacritty"});
+    // Com o terminal, o brew roda sem o SUDO_ASKPASS: o sudo pode pedir a senha.
+    const auto env = readLines(f.brew.log + ".env");
+    bool interactive = false;
+    for (const auto &e : env)
+        interactive = interactive || (has(e, "|1|1|") && e.back() == '|');
+    CHECK(interactive);
+}
+
+TEST_CASE("Ctrl+U atualiza o sistema; Ctrl+K atualiza o Homebrew", "[app][actions]")
+{
+    i18n::setLocale("en_US");
+    BrewFixture f;
+    f.app->handleEvent(Event::Special("\x15"));   // Ctrl+U, sem nada a atualizar
+    REQUIRE(f.dialog().kind == tui::Dialog::Message);
+    CHECK(f.dialog().message == "There are no new updates available!");
+    f.app->handleEvent(Event::Return);
+
+    f.brew.preview("upgrade", kUpgradeDryRun);
+    f.app->handleEvent(Event::Special("\x15"));
+    REQUIRE(f.dialog().kind == tui::Dialog::Form);
+    CHECK(f.dialog().title == "System upgrade");
+    CHECK(has(f.dialog().message, "The following 2 packages need to be retrieved"));
+    CHECK(has(f.dialog().message, "curl 8.9.1 -> 8.10.0"));
+    CHECK(has(f.dialog().message, "Pinned packages are not upgraded."));
+    CHECK(f.dialog().fields[0].checked);
+    f.app->handleEvent(Event::Return);
+    auto ops = f.brew.operations();
+    REQUIRE(ops.size() == 2);
+    CHECK(ops[0].rfind("bundle|dump|", 0) == 0);
+    CHECK(ops[1] == "upgrade|--no-ask");
+    f.app->handleEvent(Event::Return);
+
+    f.app->handleEvent(Event::Special("\x0b"));   // Ctrl+K
+    CHECK(f.brew.operations().back() == "update");
+    CHECK(f.app->viewState().status == "Ready.");
+}
+
+TEST_CASE("menus: limpar o cache, remover as dependências desnecessárias, fixar", "[app][menu][actions]")
+{
+    i18n::setLocale("en_US");
+    BrewFixture f;
+    const auto file = [&](int downs) {
+        f.app->handleEvent(Event::F9);
+        for (int i = 0; i < downs; ++i)
+            f.app->handleEvent(Event::ArrowDown);
+        f.app->handleEvent(Event::Return);
+    };
+    // Atualizar, Instalados/Repositório, (sep), Atualizar o Homebrew, Instalar as atualizações, Limpar
+    f.brew.preview("cleanup", kCleanupDryRun);
+    file(4);
+    REQUIRE(f.dialog().kind == tui::Dialog::Confirm);
+    CHECK(has(f.dialog().message, "brew cleanup would remove 2 item(s)"));
+    CHECK(has(f.dialog().message, "It would free approximately 6.2MB."));
+    f.app->handleEvent(Event::Character('y'));
+    CHECK(f.brew.operations().back() == "cleanup|--prune=all");
+
+    file(5);   // Remover as dependências desnecessárias, sem nenhuma
+    REQUIRE(f.dialog().kind == tui::Dialog::Message);
+    CHECK(f.dialog().message == "There are no unneeded dependencies.");
+    f.app->handleEvent(Event::Return);
+    f.brew.preview("autoremove", kAutoremoveDryRun);
+    file(5);
+    REQUIRE(f.dialog().kind == tui::Dialog::Confirm);
+    CHECK(has(f.dialog().message, "The following 2 packages will be removed\n  • libgpg-error\n  • lzlib"));
+    f.app->handleEvent(Event::Character('n'));   // não
+    CHECK(f.brew.operations().back() == "cleanup|--prune=all");
+    file(5);
+    f.app->handleEvent(Event::Return);           // Sim (o foco)
+    CHECK(f.brew.operations().back() == "autoremove");
+
+    // Ações → Fixar e Liberar, no pacote selecionado.
+    const auto actions = [&](int downs) {
+        f.app->handleEvent(Event::Special("\x1b" "c"));
+        REQUIRE(f.dialog().menu == 2);
+        for (int i = 0; i < downs; ++i)
+            f.app->handleEvent(Event::ArrowDown);
+        f.app->handleEvent(Event::Return);
+    };
+    f.select("f:curl");
+    actions(4);   // Marcar, Marcar, (sep), Aplicar, Cancelar, (sep), Fixar
+    CHECK(f.brew.operations().back() == "pin|--formula|curl");
+    f.select("f:wget");
+    actions(4);
+    CHECK(f.app->viewState().status == "wget is pinned.");
+    actions(5);   // Liberar
+    CHECK(f.brew.operations().back() == "unpin|--formula|wget");
+}
+
+TEST_CASE("restaurar um snapshot", "[app][menu][actions]")
+{
+    i18n::setLocale("en_US");
+    BrewFixture f;
+    const auto restore = [&] {
+        f.app->handleEvent(Event::F9);
+        for (int i = 0; i < 6; ++i)   // … Remover as dependências, (sep), Restaurar
+            f.app->handleEvent(Event::ArrowDown);
+        f.app->handleEvent(Event::Return);
+    };
+    restore();
+    REQUIRE(f.dialog().kind == tui::Dialog::Message);
+    CHECK(has(f.dialog().message, "No snapshots in " + f.snapshots()));
+    f.app->handleEvent(Event::Return);
+
+    (void)std::system(("mkdir -p '" + f.snapshots() + "'").c_str());
+    writeFile(f.snapshots() + "/261020-080000.Brewfile", "brew \"curl\"\n");
+    writeFile(f.snapshots() + "/261024-090000.Brewfile", "cask \"kitty\"\n");
+    restore();
+    REQUIRE(f.dialog().kind == tui::Dialog::Form);
+    CHECK(f.dialog().fields[0].choices == std::vector<std::string>{"261024-090000.Brewfile", "261020-080000.Brewfile"});
+    f.app->handleEvent(Event::ArrowRight);   // o mais antigo
+    f.app->handleEvent(Event::Tab);          // OK
+    f.app->handleEvent(Event::Return);
+    CHECK(f.brew.operations().back()
+          == "bundle|install|--file=" + f.snapshots() + "/261020-080000.Brewfile|--no-upgrade");
+    CHECK(f.dialog().title == "Command finished OK!");
+}
+
+TEST_CASE("diálogo da transação em português", "[view][actions]")
+{
+    BrewFixture f;
+    i18n::setLocale("pt_BR");   // depois da App, que começa em en_US (a opção --lang dos testes)
+    f.select("f:curl");
+    f.app->handleEvent(Event::Character('+'));
+    f.app->handleEvent(Event::Special("\x1b" "m"));
+    const std::string out = f.screen();
+    for (const char *t : {"Confirmação", "Confirma?", "[x] Salvar um snapshot (Brewfile) antes da transação",
+                          "[ OK ]", "[ Cancelar ]", "Marcar", "Aplicar"})
+        CHECK_INFO(out, t);
+    i18n::setLocale("en_US");
 }

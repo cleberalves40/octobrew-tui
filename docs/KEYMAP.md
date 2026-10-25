@@ -33,8 +33,22 @@ Como no octopkg-tui: o terminal envia <kbd>Ctrl+I</kbd> como <kbd>Tab</kbd> e
 | Buscar texto nas abas Arquivos, Saída e Ajuda | Ctrl+F (F3 / Shift+F3) | **Ctrl+F**; **Enter**/**F3** e **Shift+F3** (ou ↓ ↑) | ↓ ↑ | v0.1.0 |
 | Preferências / próximo tema | — | **Alt+,** / **Alt+T** | — | v0.1.0 |
 | Sair | Ctrl+Q | **Ctrl+Q**, **F10** ou **q** | **q** | v0.1.0 |
-| Marcar, aplicar, atualizar, limpar, fixar | + − Ctrl+M Ctrl+U Ctrl+K… | Fase 2 | — | — |
-| Aba Ações (3) / Notícias (5) | Alt+3 / Alt+5 | Fases 2 e 3 (as teclas ficam reservadas) | — | — |
+| Marcar para instalar / remover | + / − | **+** / **−**, ou **Insert** / **Delete** | — | v0.2.0 |
+| Aba Ações | Alt+3 | **3** ou **Alt+3** | — | v0.2.0 |
+| Aplicar | Ctrl+M | **Alt+M** (Ctrl+M é Enter) | — | v0.2.0 |
+| Cancelar (desfazer as marcas) | Ctrl+E | **Ctrl+E** | — | v0.2.0 |
+| Procurar atualizações | Ctrl+K | **Ctrl+K** (`brew update`) | — | v0.2.0 |
+| Instalar as atualizações | Ctrl+U | **Ctrl+U** (`brew upgrade`) | — | v0.2.0 |
+| Limpar o cache | Ctrl+Shift+C | menu Arquivo (`brew cleanup`), como no octopkg-tui | — | v0.2.0 |
+| Remover dependências desnecessárias | — | menu Arquivo (`brew autoremove`) | — | v0.2.0 |
+| Bloquear / desbloquear | menu de contexto | menu Ações: Fixar / Liberar (`brew pin` / `unpin`) | — | v0.2.0 |
+| Restaurar um snapshot | — (Boot Environments) | menu Arquivo | — | v0.2.0 |
+| Menu Ações | barra de menus | **Alt+C** | — | v0.2.0 |
+| Aba Notícias (5) | Alt+5 | Fase 3 (a tecla fica reservada) | — | — |
+
+Nos diálogos: <kbd>Tab</kbd> ou as setas mudam o campo, <kbd>Espaço</kbd> marca a
+opção do snapshot, <kbd>Enter</kbd> confirma e <kbd>Esc</kbd> cancela; nas confirmações,
+<kbd>y</kbd>/<kbd>s</kbd> e <kbd>n</kbd> também valem.
 
 No seletor de coluna (F6/s), no de taps (F8/t) e nos diálogos, as teclas são as do
 octopkg-tui: setas, <kbd>Enter</kbd> escolhe, <kbd>Esc</kbd> fecha; nos taps, uma letra

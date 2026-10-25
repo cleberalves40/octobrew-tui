@@ -96,6 +96,50 @@ Environment queryEnv()
             {"HOMEBREW_NO_EMOJI", "1"}};
 }
 
+// As operações: o mesmo ambiente das consultas (sem auto-update, para fazer o
+// que a prévia mostrou), sem a pergunta do brew 7 (a prévia é a da
+// interface) e sem o autoremove automático do uninstall e do cleanup, que
+// levaria pacotes que não estavam na prévia. Sem o terminal, um sudo que
+// precise de senha falha na hora, em vez de disputar a tela.
+Environment operationEnv(bool interactive)
+{
+    Environment env = queryEnv();
+    env.push_back({"HOMEBREW_NO_ASK", "1"});
+    env.push_back({"HOMEBREW_NO_AUTOREMOVE", "1"});
+    if (!interactive)
+        env.push_back({"SUDO_ASKPASS", "/usr/bin/false"});
+    return env;
+}
+
+void requirePackages(const std::vector<Package> &packages)
+{
+    if (packages.empty())
+        fail(i18n::tr("No packages selected."));
+    for (const auto &p : packages)
+        if (!validPackageName(p.fullName))
+            fail(i18n::trf("Invalid package name: %1", {p.fullName}));
+}
+
+// O comando com --formula para as fórmulas e --cask para os casks: o brew não
+// aceita os dois numa chamada.
+std::vector<std::vector<std::string>> byKind(const std::string &verb, const std::vector<std::string> &extra,
+                                             const std::vector<Package> &packages)
+{
+    std::vector<std::vector<std::string>> out;
+    for (const Kind kind : {Kind::Formula, Kind::Cask}) {
+        std::vector<std::string> args{verb};
+        args.insert(args.end(), extra.begin(), extra.end());
+        args.push_back(kind == Kind::Cask ? "--cask" : "--formula");
+        const size_t fixed = args.size();
+        for (const auto &p : packages)
+            if (p.kind == kind)
+                args.push_back(p.fullName);
+        if (args.size() > fixed)
+            out.push_back(args);
+    }
+    return out;
+}
+
 std::string defaultBrew()
 {
     // Os prefixos do Homebrew: Apple Silicon, Intel e Linux.
@@ -773,6 +817,360 @@ std::string Manager::version() const
 {
     const auto l = lines(query({"--version"}));
     return l.empty() ? std::string() : l.front();
+}
+
+// ---------------------------------------------------------------------------
+// Transações
+// ---------------------------------------------------------------------------
+
+int TransactionPreview::count() const
+{
+    int n = 0;
+    for (const auto &s : sections)
+        n += static_cast<int>(s.items.size());
+    return n;
+}
+
+std::vector<std::string> TransactionPreview::items(const std::string &verb) const
+{
+    std::vector<std::string> out;
+    for (const auto &s : sections)
+        if (verb.empty() || s.verb == verb)
+            out.insert(out.end(), s.items.begin(), s.items.end());
+    return out;
+}
+
+TransactionPreview parseDryRun(const std::string &output, const std::string &errors)
+{
+    // Seções "==> Would <verbo> ...:" seguidas de um item por linha, com as
+    // colunas alinhadas por espaços ("figlet  2.2.5", "curl 8.9.1 -> 8.10.0");
+    // outra linha "==>" (Downloading...) encerra a seção. O cleanup imprime
+    // "Would remove: caminho (tamanho)" e, no fim, o espaço que liberaria.
+    TransactionPreview p;
+    TransactionPreview::Section *current = nullptr;
+    const auto collapse = [](const std::string &s) {
+        std::string out;
+        for (char c : trim(s)) {
+            if (c == ' ' && !out.empty() && out.back() == ' ')
+                continue;
+            out += c;
+        }
+        return out;
+    };
+    const std::string freeMark = "would free approximately ";
+    for (const auto &line : lines(output)) {
+        if (line.rfind("==> ", 0) == 0) {
+            const std::string text = trim(line.substr(4));
+            current = nullptr;
+            if (text.rfind("Would ", 0) == 0 && text.back() == ':') {
+                const std::string title = text.substr(0, text.size() - 1);
+                const size_t space = title.find(' ', 6);
+                p.sections.push_back({title, title.substr(6, space == std::string::npos ? std::string::npos : space - 6), {}});
+                current = &p.sections.back();
+            } else if (text.find(freeMark) != std::string::npos) {
+                const size_t start = text.find(freeMark) + freeMark.size();
+                p.freed = text.substr(start, text.find(' ', start) - start);
+            }
+            continue;
+        }
+        if (line.rfind("Would remove: ", 0) == 0) {
+            if (p.sections.empty() || p.sections.back().title != "Would remove")
+                p.sections.push_back({"Would remove", "remove", {}});
+            p.sections.back().items.push_back(trim(line.substr(14)));
+            current = nullptr;
+            continue;
+        }
+        if (line.rfind("Warning: ", 0) == 0) {
+            p.warnings.push_back(trim(line.substr(9)));
+            current = nullptr;
+            continue;
+        }
+        if (current && !trim(line).empty())
+            current->items.push_back(collapse(line));
+    }
+    for (const auto &line : lines(errors))
+        if (line.rfind("Warning: ", 0) == 0)
+            p.warnings.push_back(trim(line.substr(9)));
+    std::vector<TransactionPreview::Section> kept;
+    for (auto &s : p.sections)
+        if (!s.items.empty())
+            kept.push_back(std::move(s));
+    p.sections = std::move(kept);
+    return p;
+}
+
+std::string itemName(const std::string &item)
+{
+    const std::string t = trim(item);
+    return t.substr(0, t.find(' '));
+}
+
+std::vector<std::string> dependentsClosure(const std::vector<Package> &installed, const std::vector<std::string> &keys)
+{
+    std::set<std::string> marked(keys.begin(), keys.end());
+    std::set<std::string> gone;   // fórmulas que saem, pelo nome completo (é o que as dependências citam)
+    for (const auto &p : installed)
+        if (marked.count(p.key()) && p.kind == Kind::Formula)
+            gone.insert(p.fullName);
+    std::vector<std::string> out;
+    for (bool changed = true; changed;) {
+        changed = false;
+        for (const auto &p : installed) {
+            if (marked.count(p.key()))
+                continue;
+            for (const auto &d : p.dependencies) {
+                if (!gone.count(d))
+                    continue;
+                marked.insert(p.key());
+                out.push_back(p.key());
+                if (p.kind == Kind::Formula)
+                    gone.insert(p.fullName);
+                changed = true;
+                break;
+            }
+        }
+    }
+    return out;
+}
+
+bool isForbidden(const Package &p)
+{
+    return p.kind == Kind::Formula && (p.name == "ftxui" || p.name == "octobrew-tui");
+}
+
+bool caskNeedsSudo(const std::string &infoJson, const std::string &token)
+{
+    static const std::set<std::string> systemSteps{"pkgutil", "launchctl", "kext", "script", "early_script"};
+    const json::Value doc = json::parse(infoJson);
+    for (const auto &c : doc["casks"].items()) {
+        if (c["token"].toString() != token && c["full_token"].toString() != token)
+            continue;
+        for (const auto &a : c["artifacts"].items())
+            for (const auto &m : a.members()) {
+                if (m.first == "pkg" || m.first == "installer")
+                    return true;
+                if (m.first != "uninstall")
+                    continue;
+                for (const auto &step : m.second.items())
+                    for (const auto &s : step.members())
+                        if (systemSteps.count(s.first))
+                            return true;
+            }
+    }
+    return false;
+}
+
+std::string snapshotName(std::time_t when)
+{
+    std::tm tm {};
+    ::localtime_r(&when, &tm);
+    char buf[32];
+    std::strftime(buf, sizeof buf, "%y%m%d-%H%M%S", &tm);
+    return std::string(buf) + ".Brewfile";
+}
+
+std::vector<std::string> listSnapshots(const std::string &dir)
+{
+    std::vector<std::string> out;
+    const std::string suffix = ".Brewfile";
+    if (DIR *d = ::opendir(dir.c_str())) {
+        while (const dirent *e = ::readdir(d)) {
+            const std::string n = e->d_name;
+            if (n.size() > suffix.size() && n.compare(n.size() - suffix.size(), suffix.size(), suffix) == 0)
+                out.push_back(n);
+        }
+        ::closedir(d);
+    }
+    // AAMMDD-hhmmss: a ordem do nome é a do tempo.
+    std::sort(out.rbegin(), out.rend());
+    return out;
+}
+
+TransactionPreview Manager::dryRun(const std::vector<std::string> &args) const
+{
+    std::vector<std::string> cmd{m_brewPath};
+    cmd.insert(cmd.end(), args.begin(), args.end());
+    const std::string shown = join(cmd, " ");
+    const ProcessResult r = runProcess(cmd, kTimeoutMs, operationEnv(false));
+    if (!r.started)
+        fail(i18n::trf("Failed to start '%1': %2", {shown, r.startError}));
+    if (r.timedOut)
+        fail(i18n::trf("Command timed out (%1 ms): %2", {std::to_string(kTimeoutMs), shown}));
+    if (r.crashed)
+        fail(i18n::trf("Process crashed: %1", {shown}));
+    if (r.status != 0) {
+        // Só as linhas de erro: os avisos não explicam a falha.
+        std::string msg;
+        for (const auto &l : lines(r.err))
+            if (l.rfind("Warning: ", 0) != 0)
+                msg += (msg.empty() ? "" : "\n") + l;
+        if (msg.rfind("Error: ", 0) == 0)
+            msg.erase(0, 7);
+        if (msg.empty())
+            msg = i18n::trf("Command failed with exit code %1", {std::to_string(r.status)});
+        fail(msg);
+    }
+    return parseDryRun(r.out, r.err);
+}
+
+TransactionPreview Manager::previewInstall(const std::vector<Package> &packages) const
+{
+    requirePackages(packages);
+    TransactionPreview all;
+    for (const auto &args : byKind("install", {"--dry-run"}, packages)) {
+        TransactionPreview p = dryRun(args);
+        all.sections.insert(all.sections.end(), p.sections.begin(), p.sections.end());
+        all.warnings.insert(all.warnings.end(), p.warnings.begin(), p.warnings.end());
+    }
+    return all;
+}
+
+TransactionPreview Manager::previewUpgrade() const
+{
+    return dryRun({"upgrade", "--dry-run"});
+}
+
+TransactionPreview Manager::previewAutoremove() const
+{
+    return dryRun({"autoremove", "--dry-run"});
+}
+
+TransactionPreview Manager::previewCleanup() const
+{
+    return dryRun({"cleanup", "--dry-run", "--prune=all"});
+}
+
+std::vector<std::string> Manager::casksNeedingSudo(const std::vector<std::string> &tokens) const
+{
+    std::vector<std::string> out;
+    if (tokens.empty())
+        return out;
+    for (const auto &t : tokens)
+        if (!validPackageName(t))
+            fail(i18n::trf("Invalid package name: %1", {t}));
+    std::vector<std::string> args{"info", "--json=v2", "--cask"};
+    args.insert(args.end(), tokens.begin(), tokens.end());
+    const std::string json = query(args);
+    for (const auto &t : tokens)
+        if (caskNeedsSudo(json, t))
+            out.push_back(t);
+    return out;
+}
+
+std::string Manager::commandLine(const std::vector<std::string> &args) const
+{
+    std::vector<std::string> cmd{"brew"};
+    cmd.insert(cmd.end(), args.begin(), args.end());
+    return join(cmd, " ");
+}
+
+std::vector<std::vector<std::string>> Manager::installArgs(const std::vector<Package> &packages)
+{
+    return byKind("install", {}, packages);
+}
+
+std::vector<std::vector<std::string>> Manager::uninstallArgs(const std::vector<Package> &packages)
+{
+    return byKind("uninstall", {}, packages);
+}
+
+std::vector<std::string> Manager::pinArgs(const Package &p, bool pin)
+{
+    return {pin ? "pin" : "unpin", p.kind == Kind::Cask ? "--cask" : "--formula", p.fullName};
+}
+
+void Manager::run(const std::vector<std::string> &args, const OutputFn &out, bool interactive) const
+{
+    std::vector<std::string> cmd{m_brewPath};
+    cmd.insert(cmd.end(), args.begin(), args.end());
+    const std::string shown = commandLine(args);
+    // Sem limite de tempo: um cask pode baixar gigabytes, e a espera inclui a
+    // senha do sudo.
+    const ProcessResult r = runProcess(cmd, -1, operationEnv(interactive), out);
+    if (!r.started)
+        fail(i18n::trf("Failed to start '%1': %2", {shown, r.startError}));
+    if (r.crashed)
+        fail(i18n::trf("Process crashed: %1", {shown}));
+    if (r.status != 0) {
+        std::string msg;
+        for (const auto &l : lines(r.err))
+            if (l.rfind("Error: ", 0) == 0 || (!msg.empty() && l.rfind("Warning: ", 0) != 0))
+                msg += (msg.empty() ? "" : "\n") + (l.rfind("Error: ", 0) == 0 ? l.substr(7) : l);
+        if (msg.empty())
+            msg = trim(r.err);
+        if (msg.find("no password was provided") != std::string::npos
+            || msg.find("a password is required") != std::string::npos)
+            msg += "\n" + i18n::tr("This cask needs sudo: run 'sudo -v' in the terminal and try again.");
+        if (msg.empty())
+            msg = i18n::trf("Command failed with exit code %1", {std::to_string(r.status)});
+        fail(msg);
+    }
+}
+
+void Manager::install(const std::vector<Package> &packages, const OutputFn &out, bool interactive) const
+{
+    requirePackages(packages);
+    for (const auto &args : installArgs(packages)) {
+        std::vector<std::string> a = args;
+        a.insert(a.begin() + 1, "--no-ask");
+        run(a, out, interactive);
+    }
+}
+
+void Manager::uninstall(const std::vector<Package> &packages, const OutputFn &out, bool interactive) const
+{
+    requirePackages(packages);
+    for (const auto &p : packages)
+        if (isForbidden(p))
+            fail(i18n::trf("%1 cannot be removed.", {p.name}));
+    // Os casks primeiro: um cask pode depender de uma fórmula que também sai.
+    auto groups = uninstallArgs(packages);
+    std::stable_sort(groups.begin(), groups.end(), [](const std::vector<std::string> &a, const std::vector<std::string> &b) {
+        return a[1] == "--cask" && b[1] != "--cask";
+    });
+    for (const auto &args : groups)
+        run(args, out, interactive);
+}
+
+void Manager::upgrade(const OutputFn &out, bool interactive) const
+{
+    run({"upgrade", "--no-ask"}, out, interactive);
+}
+
+void Manager::update(const OutputFn &out) const
+{
+    run({"update"}, out, false);
+}
+
+void Manager::cleanup(const OutputFn &out) const
+{
+    run({"cleanup", "--prune=all"}, out, false);
+}
+
+void Manager::autoremove(const OutputFn &out) const
+{
+    run({"autoremove"}, out, false);
+}
+
+void Manager::pin(const Package &p, bool pin, const OutputFn &out) const
+{
+    requirePackages({p});
+    run(pinArgs(p, pin), out, false);
+}
+
+void Manager::snapshot(const std::string &file, const OutputFn &out) const
+{
+    const size_t slash = file.rfind('/');
+    if (slash != std::string::npos)
+        (void)runProcess({"/bin/mkdir", "-p", file.substr(0, slash)}, 10000);
+    run({"bundle", "dump", "--file=" + file, "--force"}, out, false);
+}
+
+void Manager::restore(const std::string &file, const OutputFn &out, bool interactive) const
+{
+    if (::access(file.c_str(), R_OK) != 0)
+        fail(i18n::trf("Could not read %1", {file}));
+    run({"bundle", "install", "--file=" + file, "--no-upgrade"}, out, interactive);
 }
 
 } // namespace octo

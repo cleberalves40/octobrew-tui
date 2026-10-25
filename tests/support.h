@@ -52,16 +52,16 @@ inline std::vector<std::string> readLines(const std::string &path)
 
 /**
  * brew falso: registra cada chamada numa linha do log, com os argumentos
- * separados por "|", e o ambiente das consultas (HOMEBREW_NO_AUTO_UPDATE,
- * HOMEBREW_NO_COLOR e LC_ALL) em log + ".env"; depois executa body, um trecho
- * de sh com "$@" disponível.
+ * separados por "|", e o ambiente (HOMEBREW_NO_AUTO_UPDATE, HOMEBREW_NO_COLOR,
+ * LC_ALL, HOMEBREW_NO_ASK, HOMEBREW_NO_AUTOREMOVE e SUDO_ASKPASS) em log +
+ * ".env"; depois executa body, um trecho de sh com "$@" disponível.
  */
 inline std::string fakeBrew(const TempDir &dir, const std::string &log, const std::string &body)
 {
     const std::string path = dir.file("brew");
     writeExecutable(path, "#!/bin/sh\n"
                           "( IFS='|'; echo \"$*\" ) >> '" + log + "'\n"
-                          "echo \"$HOMEBREW_NO_AUTO_UPDATE|$HOMEBREW_NO_COLOR|$LC_ALL\" >> '" + log + ".env'\n"
+                          "echo \"$HOMEBREW_NO_AUTO_UPDATE|$HOMEBREW_NO_COLOR|$LC_ALL|$HOMEBREW_NO_ASK|$HOMEBREW_NO_AUTOREMOVE|$SUDO_ASKPASS\" >> '" + log + ".env'\n"
                           + body + "\n");
     return path;
 }

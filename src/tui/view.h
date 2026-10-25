@@ -9,17 +9,18 @@
 #include <array>
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/screen/box.hpp>
+#include <set>
 #include <string>
 #include <vector>
 
 namespace tui {
 
 /**
- * As abas do OctoPkg que a v0.1.0 tem, com as teclas dele: Alt+1
- * Informação, Alt+2 Arquivos, Alt+4 Saída e Alt+6 Ajuda. As teclas 3
- * (Ações) e 5 (Notícias) ficam reservadas para as abas que faltam.
+ * As abas do OctoPkg, com as teclas dele: Alt+1 Informação, Alt+2 Arquivos,
+ * Alt+3 Ações, Alt+4 Saída e Alt+6 Ajuda. A tecla 5 fica reservada para a
+ * aba Notícias (Fase 3).
  */
-enum Tab { InfoTab = 0, FilesTab, OutputTab, HelpTab, TabCount };
+enum Tab { InfoTab = 0, FilesTab, ActionsTab, OutputTab, HelpTab, TabCount };
 
 /**
  * Disposição da tela, como o F10/F11 do OctoPkg (maximizar a lista ou as
@@ -27,7 +28,7 @@ enum Tab { InfoTab = 0, FilesTab, OutputTab, HelpTab, TabCount };
  */
 enum class Layout { Normal = 0, ListOnly, TabsOnly };
 
-/** Tecla da aba ('1', '2', '4' ou '6'). */
+/** Tecla da aba ('1', '2', '3', '4' ou '6'). */
 char tabKey(int tab);
 
 struct DialogField {
@@ -41,8 +42,9 @@ struct DialogField {
 };
 
 /**
- * Diálogo modal, como no bectl-tui: formulário (as Preferências),
- * confirmação (Sim/Não), mensagem, ou os menus (F9).
+ * Diálogo modal, como no bectl-tui: formulário (a confirmação de uma
+ * transação, com a opção do snapshot, e as Preferências), confirmação
+ * (Sim/Não), mensagem, ou os menus (F9).
  */
 struct Dialog {
     enum Kind { None, Form, Confirm, Message, Menu } kind = None;
@@ -94,6 +96,8 @@ struct ViewState {
     IconMode iconMode = IconMode::Nerd;
     bool sortChooserOpen = false;
     int sortChooserIndex = 0;          // 0 = ordem do brew, 1… = colunas
+    std::set<std::string> toInstall;   // marcados com +, como no OctoPkg (Package::key())
+    std::set<std::string> toRemove;    // marcados com -
     Dialog dialog;
     std::string themeId = "system";
     // Busca na aba (Ctrl+F): o texto e a linha do resultado atual.
@@ -116,6 +120,8 @@ struct HitBoxes {
 std::string columnTitle(int column);
 /** "Formula" ou "Cask", traduzido. */
 std::string kindText(octo::Kind kind);
+/** Um pacote pela chave, para as listas ("f:curl" → "curl", "c:kitty" → "kitty (cask)"). */
+std::string keyLabel(const std::string &key);
 /** Estado do pacote por extenso ("Outdated (version 2.0 is available)"). */
 std::string statusText(const octo::Package &p);
 

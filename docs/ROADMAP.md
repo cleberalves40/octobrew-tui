@@ -14,15 +14,15 @@ núcleo que fala com o gerenciador de pacotes foi reescrito: `core/brew` no luga
 | `pkg rquery -a` | cache da API do Homebrew, lido direto | 1 ✅ |
 | `pkg upgrade -n` (desatualizados) | campo `outdated` do `brew info` (o mesmo do `brew outdated`) | 1 ✅ |
 | `automatic` (dependência) | `installed_on_request` | 1 ✅ |
-| `pkg lock` (bloqueado) | `brew pin` (fixado): estado na Fase 1, operação na Fase 2 | 1 ✅ / 2 |
+| `pkg lock` (bloqueado) | `brew pin` (fixado): estado na Fase 1, operação na Fase 2 | 1 ✅ / 2 ✅ |
 | aba Arquivos | `brew list --formula --verbose` / `brew list --cask` | 1 ✅ |
-| `pkg install -n` / `upgrade -n` | `brew install --dry-run` / `brew upgrade --dry-run` | 2 |
-| `pkg remove -n -R` | não há dry-run: `brew uses --installed --recursive` para o aviso | 2 |
-| install / remove / upgrade | `brew install [--cask]` / `brew uninstall` / `brew upgrade` | 2 |
-| `pkg update -f` (Ctrl+K) | `brew update` | 2 |
-| `pkg clean -a` | `brew cleanup --prune=all` | 2 |
-| doas/sudo | sai: o brew roda como usuário; casks com `.pkg` pedem o `sudo` com a tela suspensa | 2 |
-| Boot Environment (`bectl`) | snapshot em Brewfile (`brew bundle dump`) antes da transação | 2 |
+| `pkg install -n` / `upgrade -n` | `brew install --dry-run` / `brew upgrade --dry-run` | 2 ✅ |
+| `pkg remove -n -R` | não há dry-run: os dependentes vêm dos recibos já lidos (`runtime_dependencies`), sem chamar o brew | 2 ✅ |
+| install / remove / upgrade | `brew install --no-ask [--cask]` / `brew uninstall` / `brew upgrade --no-ask` | 2 ✅ |
+| `pkg update -f` (Ctrl+K) | `brew update` | 2 ✅ |
+| `pkg clean -a` | `brew cleanup --prune=all`, com a prévia do `--dry-run`; e `brew autoremove` | 2 ✅ |
+| doas/sudo | sai: o brew roda como usuário; casks com `.pkg` pedem o `sudo` com a tela suspensa | 2 ✅ |
+| Boot Environment (`bectl`) | snapshot em Brewfile (`brew bundle dump`) antes da transação | 2 ✅ |
 | aba Notícias (feed da variante BSD) | feed do blog do Homebrew, com o `/usr/bin/curl` | 3 |
 
 ## Fases
@@ -43,13 +43,17 @@ núcleo que fala com o gerenciador de pacotes foi reescrito: `core/brew` no luga
 - O que veio junto, por ser só interface: temas, Preferências, Ctrl+F, F7 (descrição),
   F8 (tap, no lugar da categoria), F11 e alternativas às teclas F do Mac.
 
-### Fase 2 — Transações (v0.2.0)
+### Fase 2 — Transações ✅ (v0.2.0)
 - Marcas +/−, aba Ações (3), prévia e Alt+M; Ctrl+U (upgrade), Ctrl+K (update),
   cleanup, pin/unpin e `brew autoremove`.
 - Casks que instalam `.pkg` pedem o `sudo`: a tela é suspensa, como o doas no
   octopkg-tui.
 - Snapshot em Brewfile antes da transação, com a opção de restaurar
-  (`brew bundle install`).
+  (`brew bundle install --no-upgrade`).
+- Descobertas no brew 7: o `uninstall` e o `cleanup` fazem um autoremove automático,
+  que levaria pacotes fora da prévia (`HOMEBREW_NO_AUTOREMOVE=1` nas operações; o
+  autoremove virou uma ação própria). O brew 7 pergunta antes de agir (`ask`); sem um
+  terminal, a pergunta é pulada, e o octobrew-tui passa `--no-ask` de qualquer forma.
 
 ### Fase 3 — Notícias (v0.3.0)
 - Aba Notícias (5) com o feed do blog do Homebrew, cache em disco e Ctrl+G.
@@ -76,5 +80,7 @@ núcleo que fala com o gerenciador de pacotes foi reescrito: `core/brew` no luga
    formatos do brew 5+ e do brew 4 são lidos, e os testes usam amostras reais. Se o
    formato mudar, a visão Repositório avisa, e a visão Instalados não é afetada.
 4. **Fórmulas removidas do homebrew-core** (exa, neofetch, youtube-dl…) aparecem só
-   como instaladas. Falta decidir se a Fase 2 deve destacá-las e oferecer a remoção.
+   como instaladas e podem ser removidas (−). Falta destacá-las na lista.
+6. **Reinstalar** um instalado em dia (o `pkg install -f` do OctoPkg) não foi portado:
+   `brew reinstall` não tem `--dry-run` para a prévia.
 5. **Runner Intel no CI:** só `macos-latest` (arm64) por enquanto.

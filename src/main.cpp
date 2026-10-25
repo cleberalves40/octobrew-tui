@@ -18,7 +18,8 @@ void usage()
                  "Nerd Font Mono (brew install --cask font-jetbrains-mono-nerd-font). Temas:\n"
                  "system, octopkg, frappe, latte, mocha, macchiato, solarized_dark,\n"
                  "solarized_light, selenized_dark, selenized_light, dracula, tokyo_night, nord,\n"
-                 "gruvbox, one_dark. Esta versão só lê: não instala, remove nem atualiza nada.\n";
+                 "gruvbox, one_dark. As operações rodam como o seu usuário; casks que instalam\n"
+                 "pacotes .pkg pedem o sudo, com a tela suspensa enquanto ele pede a senha.\n";
 }
 
 bool option(const char *arg, const char *name, std::string *value)
