@@ -1,5 +1,7 @@
 # Versões, a fórmula e o tap
 
+[**Português**](RELEASING.md) | [English](RELEASING.en.md)
+
 ## Versionamento
 
 O projeto segue o [versionamento semântico](https://semver.org/lang/pt-BR/), com tags

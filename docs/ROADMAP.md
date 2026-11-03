@@ -1,5 +1,7 @@
 # Roadmap
 
+[**Português**](ROADMAP.md) | [English](ROADMAP.en.md)
+
 O octobrew-tui leva o octopkg-tui (a interface de terminal do OctoPkg para o `pkg(8)`)
 ao Homebrew, com as mesmas funcionalidades. As camadas genéricas (processos, i18n,
 preferências, temas, ícones, diálogos, menus, modelo da lista) vêm do octopkg-tui. O

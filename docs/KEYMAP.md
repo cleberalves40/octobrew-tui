@@ -1,5 +1,7 @@
 # Atalhos: OctoPkg → octopkg-tui → octobrew-tui
 
+[**Português**](KEYMAP.md) | [English](KEYMAP.en.md)
+
 O octobrew-tui mantém os atalhos do octopkg-tui, que por sua vez mantém os do
 OctoPkg 0.4.2 sempre que o terminal os entrega ao programa. A interface os mostra na
 **notação do teclado da Apple**, como os menus do macOS:
